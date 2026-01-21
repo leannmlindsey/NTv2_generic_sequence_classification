@@ -34,11 +34,14 @@ echo ""
 
 # Load modules (comment out if not on Biowulf/HPC)
 module load conda 2>/dev/null || true
-module load cuda/12.8 2>/dev/null || true
+module load CUDA/12.8 2>/dev/null || true
 
 # Set CUDA_HOME if not set
 if [ -z "${CUDA_HOME}" ]; then
-    export CUDA_HOME=$(dirname $(dirname $(which nvcc 2>/dev/null))) 2>/dev/null || true
+    NVCC_PATH=$(which nvcc 2>/dev/null)
+    if [ -n "${NVCC_PATH}" ]; then
+        export CUDA_HOME=$(dirname $(dirname "${NVCC_PATH}"))
+    fi
 fi
 
 # Activate conda environment

@@ -47,6 +47,7 @@ from sklearn.preprocessing import StandardScaler
 from transformers import (
     AutoTokenizer,
     AutoModel,
+    AutoModelForMaskedLM,
     AutoConfig,
 )
 
@@ -171,6 +172,8 @@ def create_random_model(model_path: str, device: torch.device, seed: int = 42):
     Returns:
         Randomly initialized model
     """
+    from transformers import EsmModel, EsmConfig
+
     print("\n" + "=" * 60)
     print("Creating Randomly Initialized Baseline Model")
     print("=" * 60)
@@ -184,7 +187,9 @@ def create_random_model(model_path: str, device: torch.device, seed: int = 42):
     config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
 
     # Create model with random weights (not from pretrained)
-    model = AutoModel.from_config(config, trust_remote_code=True)
+    # NT-v2 models use ESM architecture
+    model = EsmModel(config)
+
     model = model.to(device)
     model.eval()
 
@@ -741,7 +746,15 @@ def main():
         print(f"Loaded embeddings - shape: {test_embeddings.shape}")
     else:
         print(f"\nLoading pretrained model from: {args.model_path}")
-        model = AutoModel.from_pretrained(args.model_path, trust_remote_code=True)
+        # NT-v2 models use ESM architecture - load via AutoModelForMaskedLM
+        full_model = AutoModelForMaskedLM.from_pretrained(args.model_path, trust_remote_code=True)
+        # Get the base model (without the LM head) for embeddings
+        if hasattr(full_model, 'esm'):
+            model = full_model.esm
+        elif hasattr(full_model, 'base_model'):
+            model = full_model.base_model
+        else:
+            model = full_model
         model = model.to(device)
 
         # Extract embeddings from pretrained model

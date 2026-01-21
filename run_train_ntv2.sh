@@ -21,7 +21,7 @@ echo "Job ID: $SLURM_JOB_ID"
 
 # Load modules
 module load conda
-module load cuda/12.8
+module load CUDA/12.8
 
 # Activate conda environment
 source activate nt
