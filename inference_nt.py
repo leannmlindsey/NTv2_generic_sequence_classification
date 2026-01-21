@@ -47,6 +47,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
 )
+from safetensors.torch import load_file as load_safetensors
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -221,25 +222,57 @@ def main():
     print(f"  Has labels: {has_labels}")
 
     # Load model and tokenizer
-    print(f"\nLoading model from: {args.model_path}")
+    print(f"\nLoading fine-tuned weights from: {args.model_path}")
 
-    # Determine tokenizer path (with fallback to base model)
-    # Always use the same tokenizer the model was trained with
+    # The base model provides the architecture and tokenizer
+    # Fine-tuning only changes weights, not the tokenizer or model code
     base_model = "InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
-    tokenizer_path = args.tokenizer_path or args.model_path
 
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-        print(f"  Loaded tokenizer from: {tokenizer_path}")
-    except Exception as e:
-        # Fallback to base model tokenizer if custom tokenizer not found or fails to load
-        print(f"  Could not load tokenizer from {tokenizer_path}: {e}")
-        print(f"  Falling back to base model tokenizer: {base_model}")
-        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    # Always load tokenizer from base model (fine-tuning doesn't change it)
+    print(f"  Loading tokenizer from base model: {base_model}")
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_path, trust_remote_code=True
-    )
+    # Load model: use base model for architecture/code, checkpoint for weights
+    # Check if checkpoint has the custom model files
+    checkpoint_has_model_code = os.path.exists(os.path.join(args.model_path, "modeling_esm.py"))
+
+    if checkpoint_has_model_code:
+        # Checkpoint has everything, load directly
+        print(f"  Loading model directly from checkpoint")
+        model = AutoModelForSequenceClassification.from_pretrained(
+            args.model_path, trust_remote_code=True
+        )
+    else:
+        # Checkpoint only has weights - load architecture from base, weights from checkpoint
+        print(f"  Loading model architecture from base model: {base_model}")
+        print(f"  Loading fine-tuned weights from: {args.model_path}")
+
+        # Load the base model with classification head (num_labels=2 for binary classification)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            base_model,
+            trust_remote_code=True,
+            num_labels=2,
+        )
+
+        # Load the fine-tuned weights from checkpoint
+        checkpoint_path = os.path.join(args.model_path, "model.safetensors")
+        if os.path.exists(checkpoint_path):
+            state_dict = load_safetensors(checkpoint_path)
+            model.load_state_dict(state_dict)
+            print(f"  Loaded weights from: {checkpoint_path}")
+        else:
+            # Try pytorch format
+            checkpoint_path = os.path.join(args.model_path, "pytorch_model.bin")
+            if os.path.exists(checkpoint_path):
+                state_dict = torch.load(checkpoint_path, map_location="cpu")
+                model.load_state_dict(state_dict)
+                print(f"  Loaded weights from: {checkpoint_path}")
+            else:
+                raise FileNotFoundError(
+                    f"No model weights found in {args.model_path}. "
+                    "Expected 'model.safetensors' or 'pytorch_model.bin'"
+                )
+
     model = model.to(device)
 
     if tokenizer.pad_token is None:
