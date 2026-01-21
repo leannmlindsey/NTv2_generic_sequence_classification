@@ -87,6 +87,11 @@ echo ""
 # ============================================================
 # Run training
 # ============================================================
+# Navigate to repo root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "${SCRIPT_DIR}/.." || exit
+echo "Working directory: $(pwd)"
+
 python finetune_nt_phage.py \
     --model_name "$MODEL_NAME" \
     --dataset_dir "$DATASET_DIR" \

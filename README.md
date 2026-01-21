@@ -85,8 +85,8 @@ python finetune_nt_phage.py \
 ### SLURM Script (for HPC)
 
 ```bash
-# Edit run_train_ntv2.sh with your paths, then submit:
-sbatch run_train_ntv2.sh
+# Edit slurm_scripts/run_train_ntv2.sh with your paths, then submit:
+sbatch slurm_scripts/run_train_ntv2.sh
 ```
 
 ### Test Results
