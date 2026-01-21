@@ -224,14 +224,17 @@ def main():
     print(f"\nLoading model from: {args.model_path}")
 
     # Determine tokenizer path (with fallback to base model)
+    # Always use the same tokenizer the model was trained with
+    base_model = "InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
     tokenizer_path = args.tokenizer_path or args.model_path
+
     try:
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    except (OSError, EnvironmentError):
-        # Fallback to base model tokenizer if custom tokenizer not found
-        print(f"  Tokenizer not found at {tokenizer_path}, falling back to base model...")
-        base_model = "InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
-        print(f"  Loading tokenizer from: {base_model}")
+        print(f"  Loaded tokenizer from: {tokenizer_path}")
+    except Exception as e:
+        # Fallback to base model tokenizer if custom tokenizer not found or fails to load
+        print(f"  Could not load tokenizer from {tokenizer_path}: {e}")
+        print(f"  Falling back to base model tokenizer: {base_model}")
         tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
 
     model = AutoModelForSequenceClassification.from_pretrained(
