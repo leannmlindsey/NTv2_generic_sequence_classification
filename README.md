@@ -176,24 +176,84 @@ The JSON output will include `embedding_power_*` metrics showing the difference 
 
 ---
 
+## Inference
+
+Run inference on a CSV file using a fine-tuned model to get predictions with probability scores.
+
+### Run Inference
+
+```bash
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/finetuned/model" \
+    --output_csv="/path/to/predictions.csv" \
+    --threshold=0.5 \
+    --save_metrics
+```
+
+### Input Format
+
+CSV file with at least a `sequence` column. If `label` column is present, metrics will be computed.
+
+```csv
+sequence,label
+ACGTACGTACGT...,0
+TGCATGCATGCA...,1
+```
+
+### Output Format
+
+CSV file with predictions and probabilities:
+- `sequence`: Original sequence
+- `label`: Original label (if present)
+- `prob_0`: Probability of class 0
+- `prob_1`: Probability of class 1
+- `pred_label`: Predicted label
+
+If `--save_metrics` is specified and labels are present, a `_metrics.json` file is also saved.
+
+### Threshold Analysis
+
+Use custom threshold for classification:
+
+```bash
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --threshold=0.7 \
+    --save_metrics
+```
+
+---
+
 ## SLURM Scripts (for HPC)
 
 SLURM scripts are provided in `slurm_scripts/` for running on HPC clusters (configured for NIH Biowulf):
 
 ### Fine-tuning
 ```bash
-# Edit configuration in run_train_ntv2.sh, then:
-sbatch run_train_ntv2.sh
+# Edit configuration in slurm_scripts/run_train_ntv2.sh, then:
+sbatch slurm_scripts/run_train_ntv2.sh
 ```
 
 ### Embedding Analysis
 ```bash
-# 1. Edit configuration in wrapper_run_embedding_analysis.sh
+# 1. Edit configuration in slurm_scripts/wrapper_run_embedding_analysis.sh
 # 2. Submit job:
 bash slurm_scripts/wrapper_run_embedding_analysis.sh
 
 # For interactive testing (no sbatch):
 bash slurm_scripts/run_embedding_analysis_interactive.sh
+```
+
+### Inference
+```bash
+# 1. Edit configuration in slurm_scripts/wrapper_run_inference.sh
+# 2. Submit job:
+bash slurm_scripts/wrapper_run_inference.sh
+
+# For interactive testing (no sbatch):
+bash slurm_scripts/run_inference_interactive.sh
 ```
 
 ---
@@ -228,6 +288,18 @@ bash slurm_scripts/run_embedding_analysis_interactive.sh
 | `--nn_hidden_dim` | 256 | Hidden dimension for 3-layer NN |
 | `--nn_lr` | 0.001 | Learning rate for 3-layer NN |
 | `--include_random_baseline` | false | Include random baseline comparison |
+
+### Inference Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--input_csv` | (required) | CSV file with 'sequence' column |
+| `--model_path` | (required) | Path to fine-tuned model directory |
+| `--output_csv` | auto | Output CSV path (default: input with _predictions suffix) |
+| `--batch_size` | 16 | Batch size for inference |
+| `--max_length` | 2048 | Max sequence length in tokens |
+| `--threshold` | 0.5 | Classification threshold for prob_1 |
+| `--save_metrics` | false | Save metrics JSON if labels present |
 
 ---
 
