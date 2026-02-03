@@ -114,6 +114,31 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use float16 mixed precision (use if bf16 not supported)",
     )
+
+    # Profiling flags
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable profiling mode with torch.profiler (outputs trace for analysis)",
+    )
+    parser.add_argument(
+        "--profile_warmup",
+        type=int,
+        default=3,
+        help="Number of warmup batches before profiling (default: 3)",
+    )
+    parser.add_argument(
+        "--profile_batches",
+        type=int,
+        default=10,
+        help="Number of batches to profile (default: 10)",
+    )
+    parser.add_argument(
+        "--profile_output",
+        type=str,
+        default="./profile_traces",
+        help="Directory to save profiling traces (default: ./profile_traces)",
+    )
     return parser.parse_args()
 
 
@@ -182,6 +207,272 @@ def run_inference(
     preds_array = np.array(all_preds)
 
     return probs_array, preds_array
+
+
+def run_profiled_inference(
+    model,
+    tokenizer,
+    sequences: List[str],
+    batch_size: int,
+    max_length: int,
+    device: torch.device,
+    amp_dtype: torch.dtype = None,
+    warmup_batches: int = 3,
+    profile_batches: int = 10,
+    output_dir: str = "./profile_traces",
+) -> Dict:
+    """
+    Run profiled inference for performance analysis.
+
+    Args:
+        model: The fine-tuned model
+        tokenizer: The tokenizer
+        sequences: List of DNA sequences
+        batch_size: Batch size for processing
+        max_length: Maximum sequence length
+        device: Device to run on
+        amp_dtype: If set, use automatic mixed precision with this dtype
+        warmup_batches: Number of warmup batches before profiling
+        profile_batches: Number of batches to profile
+        output_dir: Directory to save profiling traces
+
+    Returns:
+        Dict with profiling results and statistics
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+
+    model.eval()
+    use_amp = amp_dtype is not None and device.type == "cuda"
+
+    # Prepare batches
+    all_batches = []
+    for i in range(0, len(sequences), batch_size):
+        batch_seqs = sequences[i:i + batch_size]
+        inputs = tokenizer(
+            batch_seqs,
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        all_batches.append(inputs)
+
+    total_batches_needed = warmup_batches + profile_batches
+    if len(all_batches) < total_batches_needed:
+        print(f"WARNING: Only {len(all_batches)} batches available, "
+              f"need {total_batches_needed} for warmup + profiling")
+        # Cycle through batches if needed
+        while len(all_batches) < total_batches_needed:
+            all_batches.extend(all_batches[:total_batches_needed - len(all_batches)])
+
+    # Warmup runs (not profiled)
+    print(f"\nRunning {warmup_batches} warmup batches...")
+    with torch.no_grad():
+        for i in range(warmup_batches):
+            inputs = all_batches[i]
+            if use_amp:
+                with torch.cuda.amp.autocast(dtype=amp_dtype):
+                    _ = model(**inputs)
+            else:
+                _ = model(**inputs)
+    torch.cuda.synchronize()
+
+    # Profiled runs
+    print(f"Profiling {profile_batches} batches...")
+
+    # Determine precision string for filenames
+    if amp_dtype == torch.float16:
+        precision_str = "fp16"
+    elif amp_dtype == torch.bfloat16:
+        precision_str = "bf16"
+    else:
+        precision_str = "fp32"
+
+    trace_filename = f"trace_bs{batch_size}_{precision_str}"
+
+    # Configure profiler
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        with_flops=True,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(output_dir),
+    ) as prof:
+        with torch.no_grad():
+            for i in range(profile_batches):
+                inputs = all_batches[warmup_batches + i]
+                if use_amp:
+                    with torch.cuda.amp.autocast(dtype=amp_dtype):
+                        outputs = model(**inputs)
+                        logits = outputs.logits
+                else:
+                    outputs = model(**inputs)
+                    logits = outputs.logits
+
+                # Include softmax in profiling
+                _ = torch.softmax(logits.float(), dim=-1)
+
+                prof.step()
+
+    torch.cuda.synchronize()
+
+    # Export Chrome trace
+    chrome_trace_path = os.path.join(output_dir, f"{trace_filename}_chrome.json")
+    prof.export_chrome_trace(chrome_trace_path)
+
+    # Print summary table
+    print("\n" + "=" * 80)
+    print("PROFILING RESULTS")
+    print("=" * 80)
+    print(f"Batch size: {batch_size}, Precision: {precision_str}")
+    print(f"Profiled batches: {profile_batches}")
+    print("=" * 80)
+
+    # Summary sorted by CUDA time
+    print("\nTop 20 operations by CUDA time:")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+
+    # Summary sorted by CPU time
+    print("\nTop 10 operations by CPU time:")
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+
+    # Memory summary
+    print("\nTop 10 operations by CUDA memory:")
+    print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+
+    # Calculate aggregate statistics
+    key_averages = prof.key_averages()
+    total_cuda_time = sum(item.cuda_time_total for item in key_averages)
+    total_cpu_time = sum(item.cpu_time_total for item in key_averages)
+
+    # Get FLOPS if available
+    total_flops = sum(getattr(item, 'flops', 0) or 0 for item in key_averages)
+
+    # Calculate model size and memory bandwidth estimation
+    num_params = sum(p.numel() for p in model.parameters())
+    bytes_per_param = 2 if amp_dtype in [torch.float16, torch.bfloat16] else 4
+    model_size_bytes = num_params * bytes_per_param
+    model_size_gb = model_size_bytes / (1024**3)
+
+    # Estimate memory traffic per batch (model weights + activations)
+    # For inference: we load model weights once per forward pass
+    # Activations depend on batch_size, seq_len, hidden_dim
+    # This is a simplified estimate
+    estimated_bytes_per_batch = model_size_bytes  # At minimum, load all weights
+
+    time_seconds = total_cuda_time / 1e6  # Convert from microseconds
+    total_bytes_transferred = estimated_bytes_per_batch * profile_batches
+
+    # Memory bandwidth achieved (GB/s)
+    achieved_bandwidth_gbs = (total_bytes_transferred / (1024**3)) / time_seconds if time_seconds > 0 else 0
+
+    # A100 peak bandwidth for reference
+    a100_peak_bandwidth_gbs = 2039  # GB/s for A100 80GB HBM2e
+    bandwidth_utilization = (achieved_bandwidth_gbs / a100_peak_bandwidth_gbs) * 100 if a100_peak_bandwidth_gbs > 0 else 0
+
+    # Arithmetic intensity (FLOPs / Bytes)
+    arithmetic_intensity = total_flops / total_bytes_transferred if total_bytes_transferred > 0 else 0
+
+    stats = {
+        "batch_size": batch_size,
+        "precision": precision_str,
+        "profile_batches": profile_batches,
+        "total_cuda_time_ms": total_cuda_time / 1000,
+        "total_cpu_time_ms": total_cpu_time / 1000,
+        "avg_batch_cuda_time_ms": total_cuda_time / 1000 / profile_batches,
+        "total_flops": total_flops,
+        "chrome_trace_path": chrome_trace_path,
+        "tensorboard_dir": output_dir,
+        "model_params": num_params,
+        "model_size_gb": model_size_gb,
+        "bytes_per_param": bytes_per_param,
+        "estimated_bytes_per_batch": estimated_bytes_per_batch,
+        "achieved_bandwidth_gbs": achieved_bandwidth_gbs,
+        "bandwidth_utilization_pct": bandwidth_utilization,
+        "arithmetic_intensity": arithmetic_intensity,
+    }
+
+    # Calculate throughput
+    sequences_profiled = profile_batches * batch_size
+    stats["throughput_seq_per_sec"] = sequences_profiled / time_seconds if time_seconds > 0 else 0
+
+    # Print summary
+    print("\n" + "=" * 80)
+    print("SUMMARY STATISTICS")
+    print("=" * 80)
+    print(f"  Total CUDA time: {stats['total_cuda_time_ms']:.2f} ms")
+    print(f"  Avg batch CUDA time: {stats['avg_batch_cuda_time_ms']:.2f} ms")
+    print(f"  Throughput: {stats['throughput_seq_per_sec']:.1f} sequences/second")
+
+    print("\n  --- Model Info ---")
+    print(f"  Parameters: {num_params:,} ({num_params/1e6:.1f}M)")
+    print(f"  Model size: {model_size_gb:.2f} GB ({precision_str})")
+
+    print("\n  --- Memory Bandwidth Analysis ---")
+    print(f"  Estimated bytes/batch: {estimated_bytes_per_batch / (1024**2):.1f} MB")
+    print(f"  Achieved bandwidth: {achieved_bandwidth_gbs:.1f} GB/s")
+    print(f"  A100 peak bandwidth: {a100_peak_bandwidth_gbs} GB/s")
+    print(f"  Bandwidth utilization: {bandwidth_utilization:.1f}%")
+
+    if total_flops > 0:
+        tflops = total_flops / 1e12
+        tflops_per_sec = tflops / time_seconds if time_seconds > 0 else 0
+        print("\n  --- Compute Analysis ---")
+        print(f"  Total TFLOPs: {tflops:.2f}")
+        print(f"  Achieved TFLOPS/s: {tflops_per_sec:.2f}")
+        # A100 peak compute
+        a100_peak_tflops_fp16 = 312  # TFLOPS for fp16/bf16
+        a100_peak_tflops_fp32 = 19.5  # TFLOPS for fp32
+        peak_tflops = a100_peak_tflops_fp16 if amp_dtype else a100_peak_tflops_fp32
+        compute_utilization = (tflops_per_sec / peak_tflops) * 100
+        print(f"  A100 peak TFLOPS ({precision_str}): {peak_tflops}")
+        print(f"  Compute utilization: {compute_utilization:.1f}%")
+        stats["tflops"] = tflops
+        stats["tflops_per_sec"] = tflops_per_sec
+        stats["compute_utilization_pct"] = compute_utilization
+
+        print("\n  --- Roofline Analysis ---")
+        print(f"  Arithmetic intensity: {arithmetic_intensity:.2f} FLOPs/Byte")
+        # Ridge point for A100: peak_compute / peak_bandwidth
+        ridge_point = (peak_tflops * 1e12) / (a100_peak_bandwidth_gbs * 1e9)
+        print(f"  A100 ridge point: {ridge_point:.1f} FLOPs/Byte")
+        if arithmetic_intensity < ridge_point:
+            print(f"  Status: MEMORY BOUND (below ridge point)")
+        else:
+            print(f"  Status: COMPUTE BOUND (above ridge point)")
+        stats["ridge_point"] = ridge_point
+        stats["is_memory_bound"] = arithmetic_intensity < ridge_point
+
+    print("=" * 80)
+
+    print("\n  --- Cache Analysis (requires ncu for details) ---")
+    print("  For detailed cache miss rates, run with NVIDIA Nsight Compute:")
+    print(f"    ncu --set full -o profile python inference_nt.py --input_csv ... --{precision_str}")
+    print("  Key metrics to look for:")
+    print("    - l2_tex_read_hit_rate: L2 cache hit rate")
+    print("    - dram_read_throughput: HBM read bandwidth")
+    print("    - sm_efficiency: Streaming multiprocessor utilization")
+    print("=" * 80)
+
+    print(f"\nTraces saved to:")
+    print(f"  Chrome trace: {chrome_trace_path}")
+    print(f"  TensorBoard: {output_dir}")
+    print(f"\nTo view in TensorBoard: tensorboard --logdir={output_dir}")
+    print(f"To view Chrome trace: Open chrome://tracing and load {chrome_trace_path}")
+
+    # Save stats to JSON
+    stats_path = os.path.join(output_dir, f"{trace_filename}_stats.json")
+    with open(stats_path, "w") as f:
+        json.dump(stats, f, indent=2)
+    print(f"Stats saved to: {stats_path}")
+
+    return stats
 
 
 def calculate_metrics(
@@ -313,8 +604,25 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Run inference
+    # Run inference (or profiled inference)
     sequences = df["sequence"].tolist()
+
+    if args.profile:
+        # Run profiled inference mode
+        print("\n" + "=" * 60)
+        print("PROFILING MODE")
+        print("=" * 60)
+        profile_stats = run_profiled_inference(
+            model, tokenizer, sequences,
+            args.batch_size, args.max_length, device,
+            amp_dtype=amp_dtype,
+            warmup_batches=args.profile_warmup,
+            profile_batches=args.profile_batches,
+            output_dir=args.profile_output,
+        )
+        # After profiling, still run full inference for predictions
+        print("\nRunning full inference for predictions...")
+
     probs, preds = run_inference(
         model, tokenizer, sequences,
         args.batch_size, args.max_length, device,
