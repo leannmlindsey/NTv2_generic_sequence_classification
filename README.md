@@ -250,6 +250,34 @@ python inference_nt.py \
 | fp16 | 86.2 seq/s | 1893 MB | **2.6x** |
 | bf16 | 76.2 seq/s | 3242 MB | 2.3x |
 
+### torch.compile() Optimization
+
+Use `torch.compile()` for potential additional speedup through kernel fusion and optimization:
+
+```bash
+# Combine fp16 with torch.compile
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16 \
+    --compile
+
+# With max-autotune mode (slower compilation, potentially faster inference)
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16 \
+    --compile \
+    --compile_mode max-autotune
+```
+
+**Compile modes:**
+- `reduce-overhead` (default): Reduces Python overhead, good for small batches
+- `default`: Balanced compilation
+- `max-autotune`: Spends more time compiling for best performance
+
+**Note:** First inference run will be slow due to compilation. Subsequent runs will be faster.
+
 ### Directory-based Inference
 
 Process all CSV files in a directory with a single model load (much faster than separate jobs):
@@ -417,6 +445,8 @@ bash slurm_scripts/run_inference_interactive.sh
 | `--save_metrics` | false | Save metrics JSON if labels present |
 | `--fp16` | false | Use float16 mixed precision (~2.6x faster) |
 | `--bf16` | false | Use bfloat16 mixed precision (for A100 GPUs) |
+| `--compile` | false | Use torch.compile() for kernel optimization |
+| `--compile_mode` | `reduce-overhead` | Compile mode: default, reduce-overhead, max-autotune |
 | `--profile_torch` | false | Enable torch.profiler (no special permissions needed) |
 | `--profile_batches` | 10 | Number of batches to profile |
 | `--profile_output` | `./profile_traces` | Directory for profiling output |

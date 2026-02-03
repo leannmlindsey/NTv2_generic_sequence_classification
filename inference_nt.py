@@ -114,6 +114,18 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use float16 mixed precision (use if bf16 not supported)",
     )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Use torch.compile() for potential speedup (first run will be slow due to compilation)",
+    )
+    parser.add_argument(
+        "--compile_mode",
+        type=str,
+        default="reduce-overhead",
+        choices=["default", "reduce-overhead", "max-autotune"],
+        help="torch.compile mode: default, reduce-overhead (less Python overhead), max-autotune (best perf, slow compile)",
+    )
 
     # Profiling flags
     parser.add_argument(
@@ -666,6 +678,12 @@ def main():
         print("  Using float16 mixed precision (autocast)")
         amp_dtype = torch.float16
 
+    # Apply torch.compile() if requested
+    if args.compile:
+        print(f"  Compiling model with torch.compile(mode='{args.compile_mode}')")
+        print("  Note: First inference will be slow due to compilation...")
+        model = torch.compile(model, mode=args.compile_mode)
+
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -765,6 +783,12 @@ def main():
         print(f"Precision: float16")
     else:
         print(f"Precision: float32 (default)")
+
+    # Print compile status
+    if args.compile:
+        print(f"torch.compile: enabled (mode={args.compile_mode})")
+    else:
+        print(f"torch.compile: disabled")
 
     # Print GPU memory usage if available
     if torch.cuda.is_available():
