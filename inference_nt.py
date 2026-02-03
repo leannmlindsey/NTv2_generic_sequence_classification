@@ -189,7 +189,7 @@ def run_inference(
 
         with torch.no_grad():
             if use_amp:
-                with torch.cuda.amp.autocast(dtype=amp_dtype):
+                with torch.amp.autocast('cuda', dtype=amp_dtype):
                     outputs = model(**inputs)
                     logits = outputs.logits
             else:
@@ -273,7 +273,7 @@ def run_profiled_inference(
         for i in range(warmup_batches):
             inputs = all_batches[i]
             if use_amp:
-                with torch.cuda.amp.autocast(dtype=amp_dtype):
+                with torch.amp.autocast('cuda', dtype=amp_dtype):
                     _ = model(**inputs)
             else:
                 _ = model(**inputs)
@@ -291,8 +291,9 @@ def run_profiled_inference(
         precision_str = "fp32"
 
     trace_filename = f"trace_bs{batch_size}_{precision_str}"
+    chrome_trace_path = os.path.join(output_dir, f"{trace_filename}_chrome.json")
 
-    # Configure profiler
+    # Configure profiler (without on_trace_ready to allow manual export)
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -302,13 +303,12 @@ def run_profiled_inference(
         profile_memory=True,
         with_stack=True,
         with_flops=True,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(output_dir),
     ) as prof:
         with torch.no_grad():
             for i in range(profile_batches):
                 inputs = all_batches[warmup_batches + i]
                 if use_amp:
-                    with torch.cuda.amp.autocast(dtype=amp_dtype):
+                    with torch.amp.autocast('cuda', dtype=amp_dtype):
                         outputs = model(**inputs)
                         logits = outputs.logits
                 else:
@@ -323,7 +323,6 @@ def run_profiled_inference(
     torch.cuda.synchronize()
 
     # Export Chrome trace
-    chrome_trace_path = os.path.join(output_dir, f"{trace_filename}_chrome.json")
     prof.export_chrome_trace(chrome_trace_path)
 
     # Print summary table
@@ -388,7 +387,6 @@ def run_profiled_inference(
         "avg_batch_cuda_time_ms": total_cuda_time / 1000 / profile_batches,
         "total_flops": total_flops,
         "chrome_trace_path": chrome_trace_path,
-        "tensorboard_dir": output_dir,
         "model_params": num_params,
         "model_size_gb": model_size_gb,
         "bytes_per_param": bytes_per_param,
@@ -462,9 +460,7 @@ def run_profiled_inference(
 
     print(f"\nTraces saved to:")
     print(f"  Chrome trace: {chrome_trace_path}")
-    print(f"  TensorBoard: {output_dir}")
-    print(f"\nTo view in TensorBoard: tensorboard --logdir={output_dir}")
-    print(f"To view Chrome trace: Open chrome://tracing and load {chrome_trace_path}")
+    print(f"\nTo view Chrome trace: Open chrome://tracing and load the JSON file")
 
     # Save stats to JSON
     stats_path = os.path.join(output_dir, f"{trace_filename}_stats.json")
