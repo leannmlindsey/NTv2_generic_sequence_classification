@@ -109,60 +109,61 @@ def calculate_genome_averaged_metrics(df: pd.DataFrame) -> dict:
     metrics = {"method": "genome_averaged (macro)"}
     for col in metric_cols:
         if col in df.columns:
-            metrics[col] = df[col].mean()
+            metrics[col] = float(df[col].mean())
+            metrics[f"{col}_std"] = float(df[col].std())
 
-    # Also report totals
+    # Also report totals (convert to native Python int for JSON serialization)
     for col in ["true_positives", "false_positives", "true_negatives", "false_negatives", "samples"]:
         if col in df.columns:
-            metrics[f"total_{col}"] = df[col].sum()
+            metrics[f"total_{col}"] = int(df[col].sum())
 
     return metrics
 
 
 def calculate_aggregate_metrics(df: pd.DataFrame) -> dict:
     """Calculate metrics from aggregated confusion matrix (micro-average)."""
-    # Sum up all TP, TN, FP, FN across genomes
-    tp = df["true_positives"].sum()
-    tn = df["true_negatives"].sum()
-    fp = df["false_positives"].sum()
-    fn = df["false_negatives"].sum()
+    # Sum up all TP, TN, FP, FN across genomes (convert to Python int)
+    tp = int(df["true_positives"].sum())
+    tn = int(df["true_negatives"].sum())
+    fp = int(df["false_positives"].sum())
+    fn = int(df["false_negatives"].sum())
 
     total = tp + tn + fp + fn
 
     metrics = {
         "method": "aggregate (micro)",
-        "total_samples": int(total),
-        "total_true_positives": int(tp),
-        "total_false_positives": int(fp),
-        "total_true_negatives": int(tn),
-        "total_false_negatives": int(fn),
+        "total_samples": total,
+        "total_true_positives": tp,
+        "total_false_positives": fp,
+        "total_true_negatives": tn,
+        "total_false_negatives": fn,
     }
 
     # Calculate metrics from aggregated counts
-    metrics["accuracy"] = (tp + tn) / total if total > 0 else 0.0
-    metrics["precision"] = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    metrics["recall"] = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    metrics["accuracy"] = float((tp + tn) / total) if total > 0 else 0.0
+    metrics["precision"] = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    metrics["recall"] = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
     metrics["sensitivity"] = metrics["recall"]  # Same as recall
-    metrics["specificity"] = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-    metrics["fpr"] = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-    metrics["fnr"] = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+    metrics["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+    metrics["fpr"] = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    metrics["fnr"] = float(fn / (fn + tp)) if (fn + tp) > 0 else 0.0
 
     # F1 score
     if metrics["precision"] + metrics["recall"] > 0:
-        metrics["f1"] = 2 * (metrics["precision"] * metrics["recall"]) / (metrics["precision"] + metrics["recall"])
+        metrics["f1"] = float(2 * (metrics["precision"] * metrics["recall"]) / (metrics["precision"] + metrics["recall"]))
     else:
         metrics["f1"] = 0.0
 
     # MCC from confusion matrix
     numerator = (tp * tn) - (fp * fn)
     denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-    metrics["mcc"] = numerator / denominator if denominator > 0 else 0.0
+    metrics["mcc"] = float(numerator / denominator) if denominator > 0 else 0.0
 
     # AUC cannot be computed from aggregated counts (needs probabilities)
     # We can report the average AUC as a weighted average
     if "auc" in df.columns:
-        total_samples = df["samples"].sum()
-        weighted_auc = (df["auc"] * df["samples"]).sum() / total_samples
+        total_samples = int(df["samples"].sum())
+        weighted_auc = float((df["auc"] * df["samples"]).sum() / total_samples)
         metrics["auc_weighted"] = weighted_auc
 
     return metrics
@@ -184,7 +185,9 @@ def print_summary(genome_metrics: dict, aggregate_metrics: dict):
 
     for metric in metric_order:
         if metric in genome_metrics:
-            print(f"   {metric:15s}: {genome_metrics[metric]:.6f}")
+            std_key = f"{metric}_std"
+            std_val = genome_metrics.get(std_key, 0.0)
+            print(f"   {metric:15s}: {genome_metrics[metric]:.6f} +/- {std_val:.6f}")
 
     print()
     print(f"   Total samples:  {genome_metrics.get('total_samples', 'N/A'):,}")
