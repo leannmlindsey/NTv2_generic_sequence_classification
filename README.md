@@ -224,6 +224,117 @@ python inference_nt.py \
     --save_metrics
 ```
 
+### Inference Optimization
+
+Speed up inference with mixed precision (recommended for GPU):
+
+```bash
+# Float16 mixed precision (~2.6x faster on A100)
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16
+
+# Bfloat16 mixed precision (recommended for A100 GPUs)
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --bf16
+```
+
+**Performance comparison (500M model, A100 GPU):**
+
+| Precision | Throughput | Memory | Speedup |
+|-----------|------------|--------|---------|
+| fp32 (default) | 32.7 seq/s | 2322 MB | 1x |
+| fp16 | 86.2 seq/s | 1893 MB | **2.6x** |
+| bf16 | 76.2 seq/s | 3242 MB | 2.3x |
+
+### Directory-based Inference
+
+Process all CSV files in a directory with a single model load (much faster than separate jobs):
+
+```bash
+python inference_nt_dir.py \
+    --input_dir="/path/to/csv_directory" \
+    --output_dir="/path/to/output_directory" \
+    --model_path="/path/to/finetuned/model" \
+    --fp16 \
+    --save_metrics
+```
+
+This loads the model once and processes all CSV files sequentially, saving predictions to `{basename}_predictions.csv` in the output directory.
+
+---
+
+## Profiling
+
+Profile inference to analyze performance bottlenecks and generate data for roofline analysis.
+
+### Run Profiling
+
+```bash
+python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16 \
+    --profile \
+    --profile_batches=10 \
+    --profile_output="./profile_results"
+```
+
+### Profiling Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--profile` | false | Enable profiling mode |
+| `--profile_warmup` | 3 | Number of warmup batches before profiling |
+| `--profile_batches` | 10 | Number of batches to profile |
+| `--profile_output` | `./profile_traces` | Directory to save profiling traces |
+
+### Profiling Output
+
+The profiler generates:
+
+1. **Operation breakdown** - Top operations by CUDA time, CPU time, and memory
+2. **Chrome trace** - `trace_bs{batch_size}_{precision}_chrome.json` for visualization in `chrome://tracing`
+3. **Stats JSON** - `trace_bs{batch_size}_{precision}_stats.json` with:
+   - Model size (parameters, GB)
+   - Throughput (sequences/second)
+   - Memory bandwidth analysis (achieved vs peak GB/s)
+   - Compute analysis (achieved vs peak TFLOPS)
+   - Roofline analysis (arithmetic intensity, memory/compute bound status)
+
+### Roofline Analysis
+
+The profiler calculates:
+- **Arithmetic Intensity**: FLOPs per byte transferred
+- **Ridge Point**: Where memory-bound transitions to compute-bound (A100: ~153 FLOPs/Byte)
+- **Bound Status**: Whether the workload is memory-bound or compute-bound
+
+### Detailed Profiling with NVIDIA Nsight
+
+For detailed cache analysis and kernel-level metrics:
+
+```bash
+# Nsight Systems (timeline and overview)
+nsys profile -o inference_profile python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16
+
+# Nsight Compute (kernel-level roofline)
+ncu --set full -o kernel_profile python inference_nt.py \
+    --input_csv="/path/to/test.csv" \
+    --model_path="/path/to/model" \
+    --fp16
+```
+
+Key Nsight Compute metrics:
+- `l2_tex_read_hit_rate`: L2 cache hit rate
+- `dram_read_throughput`: HBM read bandwidth
+- `sm_efficiency`: Streaming multiprocessor utilization
+
 ---
 
 ## SLURM Scripts (for HPC)
@@ -300,6 +411,26 @@ bash slurm_scripts/run_inference_interactive.sh
 | `--max_length` | 2048 | Max sequence length in tokens |
 | `--threshold` | 0.5 | Classification threshold for prob_1 |
 | `--save_metrics` | false | Save metrics JSON if labels present |
+| `--fp16` | false | Use float16 mixed precision (~2.6x faster) |
+| `--bf16` | false | Use bfloat16 mixed precision (for A100 GPUs) |
+| `--profile` | false | Enable profiling mode |
+| `--profile_batches` | 10 | Number of batches to profile |
+| `--profile_output` | `./profile_traces` | Directory for profiling output |
+
+### Directory Inference Parameters (inference_nt_dir.py)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--input_dir` | (required) | Directory containing CSV files |
+| `--output_dir` | (required) | Directory to save predictions |
+| `--model_path` | (required) | Path to fine-tuned model directory |
+| `--batch_size` | 16 | Batch size for inference |
+| `--max_length` | 2048 | Max sequence length in tokens |
+| `--threshold` | 0.5 | Classification threshold for prob_1 |
+| `--pattern` | `*.csv` | Glob pattern for input files |
+| `--save_metrics` | false | Save metrics JSON for each file |
+| `--fp16` | false | Use float16 mixed precision |
+| `--bf16` | false | Use bfloat16 mixed precision |
 
 ---
 

@@ -347,15 +347,29 @@ def run_profiled_inference(
 
     # Calculate aggregate statistics
     key_averages = prof.key_averages()
-    # Use self_cuda_time_total (newer PyTorch) with fallback to cuda_time_total (older)
-    total_cuda_time = sum(
-        getattr(item, 'self_cuda_time_total', 0) or getattr(item, 'cuda_time_total', 0) or 0
-        for item in key_averages
-    )
-    total_cpu_time = sum(
-        getattr(item, 'self_cpu_time_total', 0) or getattr(item, 'cpu_time_total', 0) or 0
-        for item in key_averages
-    )
+
+    # Helper to get CUDA time from an event (try multiple attribute names)
+    def get_cuda_time(item):
+        for attr in ['self_cuda_time_total', 'cuda_time_total', 'self_cuda_time', 'cuda_time']:
+            val = getattr(item, attr, None)
+            if val is not None and val > 0:
+                return val
+        return 0
+
+    def get_cpu_time(item):
+        for attr in ['self_cpu_time_total', 'cpu_time_total', 'self_cpu_time', 'cpu_time']:
+            val = getattr(item, attr, None)
+            if val is not None and val > 0:
+                return val
+        return 0
+
+    total_cuda_time = sum(get_cuda_time(item) for item in key_averages)
+    total_cpu_time = sum(get_cpu_time(item) for item in key_averages)
+
+    # If CUDA time is still 0, estimate from CPU time (inference was clearly running)
+    if total_cuda_time == 0 and total_cpu_time > 0:
+        print("  Note: CUDA time not captured, using CPU time as estimate")
+        total_cuda_time = total_cpu_time
 
     # Get FLOPS if available
     total_flops = sum(getattr(item, 'flops', 0) or 0 for item in key_averages)
