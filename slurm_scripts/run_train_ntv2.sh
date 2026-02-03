@@ -53,22 +53,22 @@ MODEL_NAME="InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
 
 # Dataset directory (should contain train.csv, dev.csv, test.csv)
 # Each CSV should have columns: sequence, label
-DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/2k"
+DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/4k"
 
 # Training parameters
 SEED=${1:-42}  # Use first argument as seed, default to 42
 LEARNING_RATE=3e-5
-BATCH_SIZE=4  # Adjust based on GPU memory and sequence length
+BATCH_SIZE=1  # Adjust based on GPU memory and sequence length
 EPOCHS=3
-MAX_LENGTH=2048  # In tokens (~6kb of sequence for NT-v2)
+MAX_LENGTH=4096  # In tokens (~6kb of sequence for NT-v2)
                  # NT-v2 supports up to 2048 tokens (~12kb)
                  # Reduce if you get OOM errors
 f="filtered"
-len="2k"
+len="4k"
 # Output directory
 OUTPUT_DIR="./output/${f}/${len}/nt_lambda_${f}_${len}_${SEED}_${LEARNING_RATE}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p $OUTPUT_DIR
-
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification"
 # ============================================================
 # Print configuration
 # ============================================================
@@ -88,11 +88,12 @@ echo ""
 # Run training
 # ============================================================
 # Navigate to repo root
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "${SCRIPT_DIR}/.." || exit
-echo "Working directory: $(pwd)"
+#SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+#cd "${SCRIPT_DIR}/.." || exit
+#echo "Working directory: $(pwd)"
+echo "Working directory: $SCRIPT_DIR"
 
-python finetune_nt_phage.py \
+python $SCRIPT_DIR/finetune_nt_phage.py \
     --model_name "$MODEL_NAME" \
     --dataset_dir "$DATASET_DIR" \
     --output_dir "$OUTPUT_DIR" \

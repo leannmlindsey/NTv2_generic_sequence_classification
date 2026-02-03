@@ -39,7 +39,7 @@ source activate nt
 
 # Ignore user site-packages
 export PYTHONNOUSERSITE=1
-
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification"
 # Check GPU
 echo ""
 echo "GPU Information:"
@@ -64,8 +64,7 @@ if [ -z "${CSV_DIR}" ]; then
 fi
 
 # Navigate to repo root
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "${SCRIPT_DIR}/.." || exit
+cd "${SCRIPT_DIR}"
 echo "Working directory: $(pwd)"
 
 # Set output directory

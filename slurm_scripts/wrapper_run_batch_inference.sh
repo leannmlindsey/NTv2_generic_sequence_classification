@@ -16,15 +16,16 @@
 #   /path/to/dataset1.csv
 #   /path/to/dataset2.csv
 #   /path/to/dataset3.csv
-INPUT_LIST="/path/to/input_files.txt"
-
+#INPUT_LIST="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/slurm_scripts/input_files_2k.txt"
+INPUT_LIST="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/slurm_scripts/genome_files_2k.txt"
 # === REQUIRED: Output Directory ===
 # All predictions and SLURM logs will be saved here
-OUTPUT_DIR="/path/to/output_directory"
+OUTPUT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/results/inference/2k"
 
 # === REQUIRED: Model Configuration ===
 # Path to fine-tuned model directory (or HuggingFace model name)
-MODEL_PATH="/path/to/finetuned/model"
+#MODEL_PATH="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/output/filtered/2k/nt_lambda_filtered_2k_8_3e-5_20260120_063339/checkpoint-40995"
+MODEL_PATH="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/output/filtered/2k/nt_lambda_filtered_2k_8_3e-5_20260120_063339/checkpoint-40995"
 
 # === OPTIONAL: Inference Parameters ===
 BATCH_SIZE="16"

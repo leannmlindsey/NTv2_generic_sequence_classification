@@ -15,7 +15,7 @@
 
 # === REQUIRED: Dataset Configuration ===
 # Path to directory containing train.csv, dev.csv (or val.csv), test.csv
-export CSV_DIR="/path/to/your/csv/data"
+export CSV_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/2k"
 
 # === OPTIONAL: Model Configuration ===
 # Path to fine-tuned model or HuggingFace model name
@@ -28,7 +28,7 @@ export MODEL_PATH="InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
 
 # === OPTIONAL: Output Directory ===
 # Leave empty to use default: ./results/embedding_analysis/$(basename $CSV_DIR)
-export OUTPUT_DIR=""
+export OUTPUT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/FINAL_RESULTS/NTv2/embedding_analysis/2k"
 
 # === OPTIONAL: Hyperparameters ===
 export BATCH_SIZE="16"
@@ -37,13 +37,13 @@ export POOLING="mean"              # Options: mean, cls, last
 export SEED="42"
 
 # === OPTIONAL: 3-Layer NN Parameters ===
-export NN_EPOCHS="100"
+export NN_EPOCHS="10"
 export NN_HIDDEN_DIM="256"
 export NN_LR="0.001"
 
 # === OPTIONAL: Include Random Baseline ===
 # Set to "true" to also run analysis on randomly initialized model for comparison
-export INCLUDE_RANDOM_BASELINE="false"
+export INCLUDE_RANDOM_BASELINE="true"
 
 #####################################################################
 # END CONFIGURATION
@@ -108,8 +108,9 @@ echo "Include random baseline: ${INCLUDE_RANDOM_BASELINE}"
 echo "=========================================="
 
 # Get script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
+#SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/slurm_scripts"
+cd $SCRIPT_DIR
 # Submit job
 echo "Submitting job..."
 sbatch --export=ALL \
