@@ -193,6 +193,8 @@ def calculate_metrics(
     tn, fp, fn, tp = confusion_matrix(labels, predictions, labels=[0, 1]).ravel()
     metrics["sensitivity"] = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
     metrics["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+    metrics["fpr"] = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0  # False Positive Rate
+    metrics["fnr"] = float(fn / (fn + tp)) if (fn + tp) > 0 else 0.0  # False Negative Rate
     metrics["true_negatives"] = int(tn)
     metrics["false_positives"] = int(fp)
     metrics["false_negatives"] = int(fn)
@@ -318,22 +320,20 @@ def process_single_file(
     }
 
     # Calculate metrics if labels present
-    if has_labels and args.save_metrics:
+    if has_labels:
         labels = df["label"].values
         metrics = calculate_metrics(labels, preds_thresholded, probs)
         result["metrics"] = metrics
 
-        # Save metrics JSON
-        metrics_path = os.path.join(output_dir, f"{basename}_metrics.json")
-        metrics["file"] = basename
-        metrics["samples"] = len(df)
-        with open(metrics_path, "w") as f:
-            json.dump(metrics, f, indent=2)
-        result["metrics_path"] = metrics_path
-        result["accuracy"] = metrics["accuracy"]
-    elif has_labels:
-        labels = df["label"].values
-        result["accuracy"] = float(accuracy_score(labels, preds_thresholded))
+        # Save metrics JSON if requested
+        if args.save_metrics:
+            metrics_path = os.path.join(output_dir, f"{basename}_metrics.json")
+            metrics_to_save = metrics.copy()
+            metrics_to_save["file"] = basename
+            metrics_to_save["samples"] = len(df)
+            with open(metrics_path, "w") as f:
+                json.dump(metrics_to_save, f, indent=2)
+            result["metrics_path"] = metrics_path
 
     return result
 
@@ -419,10 +419,21 @@ def main():
             total_samples += result["samples"]
             total_inference_time += result["time_seconds"]
 
-            acc_str = f", Accuracy: {result['accuracy']:.4f}" if "accuracy" in result else ""
+            # Print per-file summary
             print(f"    Samples: {result['samples']}, "
                   f"Time: {result['time_seconds']:.1f}s, "
-                  f"Throughput: {result['throughput']:.1f} seq/s{acc_str}")
+                  f"Throughput: {result['throughput']:.1f} seq/s")
+
+            # Print metrics if available
+            if "metrics" in result:
+                m = result["metrics"]
+                print(f"    Acc: {m['accuracy']:.4f}, "
+                      f"Prec: {m['precision']:.4f}, "
+                      f"Rec: {m['recall']:.4f}, "
+                      f"MCC: {m['mcc']:.4f}, "
+                      f"F1: {m['f1']:.4f}, "
+                      f"FPR: {m['fpr']:.4f}, "
+                      f"FNR: {m['fnr']:.4f}")
 
     # Summary
     total_elapsed = time.time() - total_start
@@ -444,9 +455,17 @@ def main():
         print(f"Average time per file: {avg_time_per_file:.2f}s")
         print(f"Average samples per file: {avg_samples_per_file:.0f}")
 
-    if any("accuracy" in r for r in results):
-        accuracies = [r["accuracy"] for r in results if "accuracy" in r]
-        print(f"Mean accuracy: {np.mean(accuracies):.4f}")
+    # Print average metrics if available
+    if any("metrics" in r for r in results):
+        metrics_results = [r["metrics"] for r in results if "metrics" in r]
+        print(f"\nMean metrics across {len(metrics_results)} files:")
+        print(f"  Acc: {np.mean([m['accuracy'] for m in metrics_results]):.4f}, "
+              f"Prec: {np.mean([m['precision'] for m in metrics_results]):.4f}, "
+              f"Rec: {np.mean([m['recall'] for m in metrics_results]):.4f}, "
+              f"MCC: {np.mean([m['mcc'] for m in metrics_results]):.4f}, "
+              f"F1: {np.mean([m['f1'] for m in metrics_results]):.4f}, "
+              f"FPR: {np.mean([m['fpr'] for m in metrics_results]):.4f}, "
+              f"FNR: {np.mean([m['fnr'] for m in metrics_results]):.4f}")
 
     # Save summary
     summary_path = os.path.join(args.output_dir, "summary.json")
@@ -466,6 +485,19 @@ def main():
         "batch_size": args.batch_size,
         "results": results,
     }
+
+    # Add average metrics if available
+    if any("metrics" in r for r in results):
+        metrics_results = [r["metrics"] for r in results if "metrics" in r]
+        summary["mean_metrics"] = {
+            "accuracy": float(np.mean([m["accuracy"] for m in metrics_results])),
+            "precision": float(np.mean([m["precision"] for m in metrics_results])),
+            "recall": float(np.mean([m["recall"] for m in metrics_results])),
+            "mcc": float(np.mean([m["mcc"] for m in metrics_results])),
+            "f1": float(np.mean([m["f1"] for m in metrics_results])),
+            "fpr": float(np.mean([m["fpr"] for m in metrics_results])),
+            "fnr": float(np.mean([m["fnr"] for m in metrics_results])),
+        }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     print(f"\nSummary saved to: {summary_path}")
