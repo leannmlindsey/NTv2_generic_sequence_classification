@@ -635,7 +635,13 @@ def main():
     else:
         # Checkpoint only has weights - load architecture from base, weights from checkpoint
         print(f"  Loading model architecture from base model: {base_model}")
-        print(f"  Loading fine-tuned weights from: {args.model_path}")
+        print(f"  Fine-tuned checkpoint: {args.model_path}")
+
+        # NOTE: The following from_pretrained() call will print a warning about:
+        #   - "lm_head.*" weights not being used (expected - base model has LM head, not classifier)
+        #   - "classifier.*" weights being newly initialized (expected - will be overwritten below)
+        # This warning is expected and can be safely ignored.
+        print("  (Note: The following HuggingFace warning about 'newly initialized' weights is expected)")
 
         # Load the base model with classification head (num_labels=2 for binary classification)
         model = AutoModelForSequenceClassification.from_pretrained(
@@ -644,19 +650,24 @@ def main():
             num_labels=2,
         )
 
-        # Load the fine-tuned weights from checkpoint
+        # Load the fine-tuned weights from checkpoint (overwrites the randomly initialized classifier)
         checkpoint_path = os.path.join(args.model_path, "model.safetensors")
         if os.path.exists(checkpoint_path):
             state_dict = load_safetensors(checkpoint_path)
             model.load_state_dict(state_dict)
-            print(f"  Loaded weights from: {checkpoint_path}")
+            # Verify classifier weights were loaded
+            classifier_keys = [k for k in state_dict.keys() if 'classifier' in k]
+            print(f"  Loaded fine-tuned weights from: {checkpoint_path}")
+            print(f"  Classifier head weights loaded: {classifier_keys}")
         else:
             # Try pytorch format
             checkpoint_path = os.path.join(args.model_path, "pytorch_model.bin")
             if os.path.exists(checkpoint_path):
                 state_dict = torch.load(checkpoint_path, map_location="cpu")
                 model.load_state_dict(state_dict)
-                print(f"  Loaded weights from: {checkpoint_path}")
+                classifier_keys = [k for k in state_dict.keys() if 'classifier' in k]
+                print(f"  Loaded fine-tuned weights from: {checkpoint_path}")
+                print(f"  Classifier head weights loaded: {classifier_keys}")
             else:
                 raise FileNotFoundError(
                     f"No model weights found in {args.model_path}. "

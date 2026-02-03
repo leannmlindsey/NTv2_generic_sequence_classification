@@ -280,6 +280,17 @@ python inference_nt.py \
 - First inference run will be slow due to compilation. Subsequent runs will be faster.
 - Use `default` mode for NT-v2 models (reduce-overhead may fail due to rotary embedding caching).
 
+**Important: torch.compile() may not help NT-v2 models**
+
+Testing showed that `torch.compile()` actually *decreased* performance for Nucleotide Transformer v2:
+
+| Configuration | Throughput | Result |
+|---------------|------------|--------|
+| fp16 only | 86.2 seq/s | **Recommended** |
+| fp16 + compile | 37.9 seq/s | 2.3x slower |
+
+This is due to the model's custom implementation with rotary embeddings causing graph breaks and compilation overhead. **For NT-v2, use `--fp16` without `--compile` for best performance.**
+
 ### Directory-based Inference
 
 Process all CSV files in a directory with a single model load (much faster than separate jobs):

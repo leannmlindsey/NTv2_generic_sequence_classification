@@ -217,7 +217,13 @@ def load_model(model_path: str, device: torch.device):
         )
     else:
         print(f"  Loading model architecture from base model: {base_model}")
-        print(f"  Loading fine-tuned weights from: {model_path}")
+        print(f"  Fine-tuned checkpoint: {model_path}")
+
+        # NOTE: The following from_pretrained() call will print a warning about:
+        #   - "lm_head.*" weights not being used (expected - base model has LM head, not classifier)
+        #   - "classifier.*" weights being newly initialized (expected - will be overwritten below)
+        # This warning is expected and can be safely ignored.
+        print("  (Note: The following HuggingFace warning about 'newly initialized' weights is expected)")
 
         model = AutoModelForSequenceClassification.from_pretrained(
             base_model,
@@ -225,17 +231,22 @@ def load_model(model_path: str, device: torch.device):
             num_labels=2,
         )
 
+        # Load the fine-tuned weights from checkpoint (overwrites the randomly initialized classifier)
         checkpoint_path = os.path.join(model_path, "model.safetensors")
         if os.path.exists(checkpoint_path):
             state_dict = load_safetensors(checkpoint_path)
             model.load_state_dict(state_dict)
-            print(f"  Loaded weights from: {checkpoint_path}")
+            classifier_keys = [k for k in state_dict.keys() if 'classifier' in k]
+            print(f"  Loaded fine-tuned weights from: {checkpoint_path}")
+            print(f"  Classifier head weights loaded: {classifier_keys}")
         else:
             checkpoint_path = os.path.join(model_path, "pytorch_model.bin")
             if os.path.exists(checkpoint_path):
                 state_dict = torch.load(checkpoint_path, map_location="cpu")
                 model.load_state_dict(state_dict)
-                print(f"  Loaded weights from: {checkpoint_path}")
+                classifier_keys = [k for k in state_dict.keys() if 'classifier' in k]
+                print(f"  Loaded fine-tuned weights from: {checkpoint_path}")
+                print(f"  Classifier head weights loaded: {classifier_keys}")
             else:
                 raise FileNotFoundError(
                     f"No model weights found in {model_path}. "
@@ -426,6 +437,13 @@ def main():
     print(f"Total wall time: {total_elapsed:.1f}s")
     print(f"Overall throughput: {total_samples / total_inference_time:.1f} seq/s")
 
+    # Average time per file
+    if len(results) > 0:
+        avg_time_per_file = total_inference_time / len(results)
+        avg_samples_per_file = total_samples / len(results)
+        print(f"Average time per file: {avg_time_per_file:.2f}s")
+        print(f"Average samples per file: {avg_samples_per_file:.0f}")
+
     if any("accuracy" in r for r in results):
         accuracies = [r["accuracy"] for r in results if "accuracy" in r]
         print(f"Mean accuracy: {np.mean(accuracies):.4f}")
@@ -442,6 +460,8 @@ def main():
         "total_inference_time_s": total_inference_time,
         "total_wall_time_s": total_elapsed,
         "overall_throughput": total_samples / total_inference_time if total_inference_time > 0 else 0,
+        "avg_time_per_file_s": total_inference_time / len(results) if len(results) > 0 else 0,
+        "avg_samples_per_file": total_samples / len(results) if len(results) > 0 else 0,
         "precision": "bf16" if args.bf16 else "fp16" if args.fp16 else "fp32",
         "batch_size": args.batch_size,
         "results": results,
