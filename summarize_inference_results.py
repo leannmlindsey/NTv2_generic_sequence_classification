@@ -156,7 +156,8 @@ def calculate_aggregate_metrics(df: pd.DataFrame) -> dict:
 
     # MCC from confusion matrix
     numerator = (tp * tn) - (fp * fn)
-    denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    denom_product = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
+    denominator = float(denom_product) ** 0.5 if denom_product > 0 else 0.0
     metrics["mcc"] = float(numerator / denominator) if denominator > 0 else 0.0
 
     # AUC cannot be computed from aggregated counts (needs probabilities)
