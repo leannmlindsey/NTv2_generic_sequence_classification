@@ -122,9 +122,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--compile_mode",
         type=str,
-        default="reduce-overhead",
+        default="default",
         choices=["default", "reduce-overhead", "max-autotune"],
-        help="torch.compile mode: default, reduce-overhead (less Python overhead), max-autotune (best perf, slow compile)",
+        help="torch.compile mode: default (recommended), reduce-overhead (may fail with some models), max-autotune",
     )
 
     # Profiling flags
@@ -682,6 +682,9 @@ def main():
     if args.compile:
         print(f"  Compiling model with torch.compile(mode='{args.compile_mode}')")
         print("  Note: First inference will be slow due to compilation...")
+        if args.compile_mode == "reduce-overhead":
+            print("  WARNING: reduce-overhead mode may fail with models using rotary embeddings")
+            print("           Use --compile_mode default if you encounter CUDA graph errors")
         model = torch.compile(model, mode=args.compile_mode)
 
     if tokenizer.pad_token is None:

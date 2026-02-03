@@ -272,11 +272,13 @@ python inference_nt.py \
 ```
 
 **Compile modes:**
-- `reduce-overhead` (default): Reduces Python overhead, good for small batches
-- `default`: Balanced compilation
+- `default` (recommended): Balanced compilation, works with all models
+- `reduce-overhead`: Reduces Python overhead using CUDA graphs (may fail with rotary embeddings)
 - `max-autotune`: Spends more time compiling for best performance
 
-**Note:** First inference run will be slow due to compilation. Subsequent runs will be faster.
+**Notes:**
+- First inference run will be slow due to compilation. Subsequent runs will be faster.
+- Use `default` mode for NT-v2 models (reduce-overhead may fail due to rotary embedding caching).
 
 ### Directory-based Inference
 
