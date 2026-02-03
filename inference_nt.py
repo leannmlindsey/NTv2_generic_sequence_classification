@@ -685,7 +685,9 @@ def main():
         if args.compile_mode == "reduce-overhead":
             print("  WARNING: reduce-overhead mode may fail with models using rotary embeddings")
             print("           Use --compile_mode default if you encounter CUDA graph errors")
-        model = torch.compile(model, mode=args.compile_mode)
+        # Use dynamic=False since sequence lengths are typically fixed
+        # This avoids recompilation overhead for different shapes
+        model = torch.compile(model, mode=args.compile_mode, dynamic=False)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
