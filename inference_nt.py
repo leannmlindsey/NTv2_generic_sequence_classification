@@ -294,6 +294,10 @@ def run_profiled_inference(
     chrome_trace_path = os.path.join(output_dir, f"{trace_filename}_chrome.json")
 
     # Configure profiler (without on_trace_ready to allow manual export)
+    # Also measure wall-clock time for accurate throughput calculation
+    torch.cuda.synchronize()
+    profile_start_time = time.time()
+
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -321,6 +325,7 @@ def run_profiled_inference(
                 prof.step()
 
     torch.cuda.synchronize()
+    profile_wall_time = time.time() - profile_start_time
 
     # Export Chrome trace
     prof.export_chrome_trace(chrome_trace_path)
@@ -386,7 +391,9 @@ def run_profiled_inference(
     # This is a simplified estimate
     estimated_bytes_per_batch = model_size_bytes  # At minimum, load all weights
 
-    time_seconds = total_cuda_time / 1e6  # Convert from microseconds
+    # Use wall-clock time for accurate throughput/bandwidth calculations
+    # (profiler CUDA time only captures kernel-specific time, not full execution)
+    time_seconds = profile_wall_time
     total_bytes_transferred = estimated_bytes_per_batch * profile_batches
 
     # Memory bandwidth achieved (GB/s)
@@ -399,13 +406,19 @@ def run_profiled_inference(
     # Arithmetic intensity (FLOPs / Bytes)
     arithmetic_intensity = total_flops / total_bytes_transferred if total_bytes_transferred > 0 else 0
 
+    # Calculate throughput
+    sequences_profiled = profile_batches * batch_size
+    throughput = sequences_profiled / time_seconds if time_seconds > 0 else 0
+
     stats = {
         "batch_size": batch_size,
         "precision": precision_str,
         "profile_batches": profile_batches,
-        "total_cuda_time_ms": total_cuda_time / 1000,
-        "total_cpu_time_ms": total_cpu_time / 1000,
-        "avg_batch_cuda_time_ms": total_cuda_time / 1000 / profile_batches,
+        "wall_time_seconds": profile_wall_time,
+        "wall_time_ms": profile_wall_time * 1000,
+        "avg_batch_time_ms": (profile_wall_time * 1000) / profile_batches,
+        "profiler_cuda_time_ms": total_cuda_time / 1000,
+        "profiler_cpu_time_ms": total_cpu_time / 1000,
         "total_flops": total_flops,
         "chrome_trace_path": chrome_trace_path,
         "model_params": num_params,
@@ -415,18 +428,15 @@ def run_profiled_inference(
         "achieved_bandwidth_gbs": achieved_bandwidth_gbs,
         "bandwidth_utilization_pct": bandwidth_utilization,
         "arithmetic_intensity": arithmetic_intensity,
+        "throughput_seq_per_sec": throughput,
     }
-
-    # Calculate throughput
-    sequences_profiled = profile_batches * batch_size
-    stats["throughput_seq_per_sec"] = sequences_profiled / time_seconds if time_seconds > 0 else 0
 
     # Print summary
     print("\n" + "=" * 80)
     print("SUMMARY STATISTICS")
     print("=" * 80)
-    print(f"  Total CUDA time: {stats['total_cuda_time_ms']:.2f} ms")
-    print(f"  Avg batch CUDA time: {stats['avg_batch_cuda_time_ms']:.2f} ms")
+    print(f"  Wall-clock time: {stats['wall_time_ms']:.2f} ms ({profile_batches} batches)")
+    print(f"  Avg batch time: {stats['avg_batch_time_ms']:.2f} ms")
     print(f"  Throughput: {stats['throughput_seq_per_sec']:.1f} sequences/second")
 
     print("\n  --- Model Info ---")
