@@ -102,6 +102,18 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help="Path to tokenizer (default: uses model_path, or falls back to base model)",
     )
+
+    # Optimization flags
+    parser.add_argument(
+        "--bf16",
+        action="store_true",
+        help="Use bfloat16 mixed precision (recommended for A100 GPUs)",
+    )
+    parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="Use float16 mixed precision (use if bf16 not supported)",
+    )
     return parser.parse_args()
 
 
@@ -275,6 +287,18 @@ def main():
 
     model = model.to(device)
 
+    # Apply mixed precision if requested
+    if args.bf16 and args.fp16:
+        print("WARNING: Both --bf16 and --fp16 specified, using bf16")
+        args.fp16 = False
+
+    if args.bf16:
+        print("  Converting model to bfloat16 precision")
+        model = model.to(torch.bfloat16)
+    elif args.fp16:
+        print("  Converting model to float16 precision")
+        model = model.to(torch.float16)
+
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -344,10 +368,23 @@ def main():
         acc = accuracy_score(labels, preds_thresholded)
         print(f"\nAccuracy: {acc:.4f}")
 
-    # Print timing
+    # Print timing and performance stats
     elapsed = time.time() - start_time
     print(f"\nCompleted in {elapsed:.2f} seconds")
     print(f"Throughput: {len(df) / elapsed:.1f} sequences/second")
+
+    # Print precision used
+    if args.bf16:
+        print(f"Precision: bfloat16")
+    elif args.fp16:
+        print(f"Precision: float16")
+    else:
+        print(f"Precision: float32 (default)")
+
+    # Print GPU memory usage if available
+    if torch.cuda.is_available():
+        peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+        print(f"Peak GPU memory: {peak_memory_mb:.1f} MB")
 
 
 if __name__ == "__main__":

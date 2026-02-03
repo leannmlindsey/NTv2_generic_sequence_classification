@@ -78,8 +78,8 @@ if [ -z "${CSV_DIR}" ]; then
 fi
 
 # Navigate to repo root
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "${SCRIPT_DIR}/.." || exit
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification"
+cd "${SCRIPT_DIR}" || exit
 echo "Working directory: $(pwd)"
 
 # Set output directory

@@ -78,7 +78,7 @@ echo "  Threshold: ${THRESHOLD}"
 echo "=========================================="
 
 # Get script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/slurm_scripts"
 
 # Submit job
 echo "Submitting job..."
