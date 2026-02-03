@@ -347,8 +347,15 @@ def run_profiled_inference(
 
     # Calculate aggregate statistics
     key_averages = prof.key_averages()
-    total_cuda_time = sum(item.cuda_time_total for item in key_averages)
-    total_cpu_time = sum(item.cpu_time_total for item in key_averages)
+    # Use self_cuda_time_total (newer PyTorch) with fallback to cuda_time_total (older)
+    total_cuda_time = sum(
+        getattr(item, 'self_cuda_time_total', 0) or getattr(item, 'cuda_time_total', 0) or 0
+        for item in key_averages
+    )
+    total_cpu_time = sum(
+        getattr(item, 'self_cpu_time_total', 0) or getattr(item, 'cpu_time_total', 0) or 0
+        for item in key_averages
+    )
 
     # Get FLOPS if available
     total_flops = sum(getattr(item, 'flops', 0) or 0 for item in key_averages)
