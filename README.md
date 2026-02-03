@@ -271,14 +271,18 @@ This loads the model once and processes all CSV files sequentially, saving predi
 
 Profile inference to analyze performance bottlenecks and generate data for roofline analysis.
 
-### Run Profiling
+**Two profiling options:**
+- `--profile_torch`: Uses PyTorch's built-in profiler (no special permissions needed)
+- `ncu` (Nsight Compute): Kernel-level analysis (requires GPU performance counter access)
+
+### Run Profiling with torch.profiler
 
 ```bash
 python inference_nt.py \
     --input_csv="/path/to/test.csv" \
     --model_path="/path/to/model" \
     --fp16 \
-    --profile \
+    --profile_torch \
     --profile_batches=10 \
     --profile_output="./profile_results"
 ```
@@ -287,7 +291,7 @@ python inference_nt.py \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--profile` | false | Enable profiling mode |
+| `--profile_torch` | false | Enable torch.profiler (no special permissions needed) |
 | `--profile_warmup` | 3 | Number of warmup batches before profiling |
 | `--profile_batches` | 10 | Number of batches to profile |
 | `--profile_output` | `./profile_traces` | Directory to save profiling traces |
@@ -413,7 +417,7 @@ bash slurm_scripts/run_inference_interactive.sh
 | `--save_metrics` | false | Save metrics JSON if labels present |
 | `--fp16` | false | Use float16 mixed precision (~2.6x faster) |
 | `--bf16` | false | Use bfloat16 mixed precision (for A100 GPUs) |
-| `--profile` | false | Enable profiling mode |
+| `--profile_torch` | false | Enable torch.profiler (no special permissions needed) |
 | `--profile_batches` | 10 | Number of batches to profile |
 | `--profile_output` | `./profile_traces` | Directory for profiling output |
 

@@ -117,9 +117,9 @@ def parse_arguments() -> argparse.Namespace:
 
     # Profiling flags
     parser.add_argument(
-        "--profile",
+        "--profile_torch",
         action="store_true",
-        help="Enable profiling mode with torch.profiler (outputs trace for analysis)",
+        help="Enable profiling with torch.profiler (no special permissions needed)",
     )
     parser.add_argument(
         "--profile_warmup",
@@ -624,10 +624,10 @@ def main():
     # Run inference (or profiled inference)
     sequences = df["sequence"].tolist()
 
-    if args.profile:
-        # Run profiled inference mode
+    if args.profile_torch:
+        # Run profiled inference mode with torch.profiler
         print("\n" + "=" * 60)
-        print("PROFILING MODE")
+        print("PROFILING MODE (torch.profiler)")
         print("=" * 60)
         profile_stats = run_profiled_inference(
             model, tokenizer, sequences,
