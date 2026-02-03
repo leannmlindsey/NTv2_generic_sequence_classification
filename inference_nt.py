@@ -124,6 +124,7 @@ def run_inference(
     batch_size: int,
     max_length: int,
     device: torch.device,
+    amp_dtype: torch.dtype = None,
 ) -> tuple:
     """
     Run inference on sequences.
@@ -135,6 +136,7 @@ def run_inference(
         batch_size: Batch size for processing
         max_length: Maximum sequence length
         device: Device to run on
+        amp_dtype: If set, use automatic mixed precision with this dtype (torch.float16 or torch.bfloat16)
 
     Returns:
         Tuple of (probabilities array shape (n, 2), predictions array)
@@ -142,6 +144,9 @@ def run_inference(
     model.eval()
     all_probs = []
     all_preds = []
+
+    # Set up autocast context if using mixed precision
+    use_amp = amp_dtype is not None and device.type == "cuda"
 
     # Process in batches
     for i in tqdm(range(0, len(sequences), batch_size), desc="Running inference"):
@@ -158,11 +163,16 @@ def run_inference(
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
+            if use_amp:
+                with torch.cuda.amp.autocast(dtype=amp_dtype):
+                    outputs = model(**inputs)
+                    logits = outputs.logits
+            else:
+                outputs = model(**inputs)
+                logits = outputs.logits
 
-            # Apply softmax to get probabilities
-            probs = torch.softmax(logits, dim=-1).cpu().numpy()
+            # Apply softmax to get probabilities (in fp32 for numerical stability)
+            probs = torch.softmax(logits.float(), dim=-1).cpu().numpy()
             preds = torch.argmax(logits, dim=-1).cpu().numpy()
 
             all_probs.append(probs)
@@ -287,17 +297,18 @@ def main():
 
     model = model.to(device)
 
-    # Apply mixed precision if requested
+    # Determine mixed precision dtype
     if args.bf16 and args.fp16:
         print("WARNING: Both --bf16 and --fp16 specified, using bf16")
         args.fp16 = False
 
+    amp_dtype = None
     if args.bf16:
-        print("  Converting model to bfloat16 precision")
-        model = model.to(torch.bfloat16)
+        print("  Using bfloat16 mixed precision (autocast)")
+        amp_dtype = torch.bfloat16
     elif args.fp16:
-        print("  Converting model to float16 precision")
-        model = model.to(torch.float16)
+        print("  Using float16 mixed precision (autocast)")
+        amp_dtype = torch.float16
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -307,6 +318,7 @@ def main():
     probs, preds = run_inference(
         model, tokenizer, sequences,
         args.batch_size, args.max_length, device,
+        amp_dtype=amp_dtype,
     )
 
     # Apply custom threshold if specified
