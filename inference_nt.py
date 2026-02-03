@@ -429,6 +429,27 @@ def run_profiled_inference(
         "bandwidth_utilization_pct": bandwidth_utilization,
         "arithmetic_intensity": arithmetic_intensity,
         "throughput_seq_per_sec": throughput,
+        "metric_sources": {
+            "measured": [
+                "wall_time_seconds",
+                "wall_time_ms",
+                "avg_batch_time_ms",
+                "throughput_seq_per_sec",
+                "total_flops (estimated by PyTorch from op shapes)"
+            ],
+            "estimated": [
+                "achieved_bandwidth_gbs (assumes full model load per batch)",
+                "bandwidth_utilization_pct (vs theoretical A100 peak)",
+                "arithmetic_intensity (FLOPs / estimated bytes)",
+                "compute_utilization_pct (vs theoretical A100 peak)"
+            ],
+            "not_available": [
+                "L1/L2 cache hit/miss rates (requires ncu)",
+                "actual HBM bandwidth (requires ncu)",
+                "SM occupancy (requires ncu)",
+                "warp efficiency (requires ncu)"
+            ]
+        },
     }
 
     # Print summary
@@ -480,13 +501,30 @@ def run_profiled_inference(
 
     print("=" * 80)
 
-    print("\n  --- Cache Analysis (requires ncu for details) ---")
-    print("  For detailed cache miss rates, run with NVIDIA Nsight Compute:")
+    print("\n  --- Metric Sources ---")
+    print("  MEASURED (torch.profiler):")
+    print("    - Wall-clock time, throughput")
+    print("    - Per-operation timing breakdown")
+    print("    - Memory allocation")
+    print("    - FLOPS (estimated by PyTorch based on operation shapes)")
+    print("  ESTIMATED (calculated):")
+    print("    - Memory bandwidth (assumes full model load per batch)")
+    print("    - Bandwidth/compute utilization (vs theoretical peak)")
+    print("    - Arithmetic intensity (FLOPs / estimated bytes)")
+    print("  NOT AVAILABLE (requires ncu with GPU perf counter access):")
+    print("    - L1/L2 cache hit/miss rates")
+    print("    - Actual HBM bandwidth")
+    print("    - SM occupancy and warp efficiency")
+    print("=" * 80)
+
+    print("\n  --- For Detailed Hardware Metrics (requires ncu) ---")
+    print("  Run with NVIDIA Nsight Compute (requires GPU perf counter permissions):")
     print(f"    ncu --set full -o profile python inference_nt.py --input_csv ... --{precision_str}")
-    print("  Key metrics to look for:")
+    print("  Key ncu metrics:")
     print("    - l2_tex_read_hit_rate: L2 cache hit rate")
-    print("    - dram_read_throughput: HBM read bandwidth")
+    print("    - dram_read_throughput: Actual HBM bandwidth")
     print("    - sm_efficiency: Streaming multiprocessor utilization")
+    print("    - achieved_occupancy: Warp occupancy")
     print("=" * 80)
 
     print(f"\nTraces saved to:")
