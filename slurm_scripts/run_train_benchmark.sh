@@ -61,7 +61,7 @@ DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/sma
 # Training parameters (same for both runs for fair comparison)
 SEED=42
 LEARNING_RATE=3e-5
-BATCH_SIZE=4  # Conservative to avoid OOM
+BATCH_SIZE=1  # Must be 1 for 2k sequences (attention scales as seq_len^2 * batch)
 EPOCHS=1  # Just 1 epoch for benchmarking
 MAX_LENGTH=2048
 
@@ -198,7 +198,7 @@ mkdir -p "${OUTPUT_DIR_EARLY}"
 
 echo "Output: ${OUTPUT_DIR_EARLY}" | tee -a "${RESULTS_FILE}"
 echo "Started at: $(date)" | tee -a "${RESULTS_FILE}"
-echo "Config: 10 epochs max, eval every 100 steps, patience=3, batch=4, grad_accum=2, grad_ckpt" | tee -a "${RESULTS_FILE}"
+echo "Config: 10 epochs max, eval every 100 steps, patience=3, batch=1" | tee -a "${RESULTS_FILE}"
 
 START_TIME=$(date +%s)
 
@@ -207,9 +207,8 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --dataset_dir "$DATASET_DIR" \
     --output_dir "$OUTPUT_DIR_EARLY" \
     --max_length $MAX_LENGTH \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 8 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
     --num_train_epochs 10 \
     --learning_rate $LEARNING_RATE \
     --eval_strategy steps \
@@ -218,7 +217,6 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --save_steps 100 \
     --early_stopping_patience 3 \
     --bf16 \
-    --gradient_checkpointing \
     --seed $SEED
 
 EXIT_CODE_EARLY=$?
@@ -252,7 +250,7 @@ echo "BENCHMARK SUMMARY" | tee -a "${RESULTS_FILE}"
 echo "============================================================" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
 echo "Test 1 & 2: ${EPOCHS} epoch, batch_size=${BATCH_SIZE}, max_length=${MAX_LENGTH}" | tee -a "${RESULTS_FILE}"
-echo "Test 3: 10 epochs max, batch=4, grad_accum=2, grad_ckpt, eval/100 steps, patience=3" | tee -a "${RESULTS_FILE}"
+echo "Test 3: 10 epochs max, batch=1, eval/100 steps, patience=3" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
 echo "Timing Results:" | tee -a "${RESULTS_FILE}"
 echo "  1. Baseline (fp32):           ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
