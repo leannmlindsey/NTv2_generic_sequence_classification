@@ -4,19 +4,14 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64g
 #SBATCH --cpus-per-task=8
-#SBATCH --time=4:00:00
+#SBATCH --time=8:00:00
 #SBATCH --output=nt_benchmark_%j.out
 #SBATCH --error=nt_benchmark_%j.err
 
-# Benchmark script to compare baseline (fp32) vs bf16 training
+# Benchmark script to compare fp32 vs fp16 training
+# Uses EXACT same parameters as original run_train_ntv2.sh, only varying precision
 #
 # Usage: sbatch run_train_benchmark.sh
-#
-# This runs two training configurations on a small dataset:
-#   1. Baseline (fp32) - no mixed precision
-#   2. bf16 - recommended for A100 GPUs
-#
-# Results are saved to output/benchmark/ with timing information
 
 echo "============================================================"
 echo "Nucleotide Transformer v2 Training Benchmark"
@@ -50,7 +45,7 @@ export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION - Matches original run_train_ntv2.sh exactly
 # ============================================================
 
 MODEL_NAME="InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
@@ -58,12 +53,12 @@ MODEL_NAME="InstaDeepAI/nucleotide-transformer-v2-500m-multi-species"
 # Small benchmark dataset
 DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/small"
 
-# Training parameters (same for both runs for fair comparison)
+# Training parameters - SAME as original
 SEED=42
 LEARNING_RATE=3e-5
-BATCH_SIZE=1  # Match original working config
-EPOCHS=1  # Just 1 epoch for benchmarking
-MAX_LENGTH=512  # 2k nucleotides / 6 = ~341 tokens, use 512 to be safe
+BATCH_SIZE=1
+EPOCHS=3
+MAX_LENGTH=512  # For 2k sequences: 2000/6 = ~341 tokens
 
 # Base output directory
 OUTPUT_BASE="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/output/benchmark"
@@ -77,12 +72,12 @@ RESULTS_FILE="${OUTPUT_BASE}/benchmark_results_$(date +%Y%m%d_%H%M%S).txt"
 
 echo ""
 echo "============================================================"
-echo "Benchmark Configuration"
+echo "Benchmark Configuration (matches original script)"
 echo "============================================================"
 echo "  Model: $MODEL_NAME"
 echo "  Dataset: $DATASET_DIR"
 echo "  Output base: $OUTPUT_BASE"
-echo "  Max length: $MAX_LENGTH"
+echo "  Max length: $MAX_LENGTH tokens"
 echo "  Batch size: $BATCH_SIZE"
 echo "  Epochs: $EPOCHS"
 echo "  Learning rate: $LEARNING_RATE"
@@ -91,11 +86,11 @@ echo "============================================================"
 echo ""
 
 # ============================================================
-# TEST 1: Baseline (fp32)
+# TEST 1: Baseline (fp32) - no mixed precision
 # ============================================================
 
 echo "============================================================" | tee -a "${RESULTS_FILE}"
-echo "TEST 1: Baseline (fp32)" | tee -a "${RESULTS_FILE}"
+echo "TEST 1: Baseline (fp32) - no mixed precision" | tee -a "${RESULTS_FILE}"
 echo "============================================================" | tee -a "${RESULTS_FILE}"
 
 OUTPUT_DIR_BASELINE="${OUTPUT_BASE}/baseline_fp32_$(date +%Y%m%d_%H%M%S)"
@@ -113,12 +108,18 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --max_length $MAX_LENGTH \
     --per_device_train_batch_size $BATCH_SIZE \
     --per_device_eval_batch_size 16 \
+    --gradient_accumulation_steps 1 \
     --num_train_epochs $EPOCHS \
     --learning_rate $LEARNING_RATE \
+    --weight_decay 0.01 \
+    --warmup_ratio 0.1 \
+    --logging_steps 100 \
     --eval_strategy epoch \
     --save_strategy epoch \
-    --save_total_limit 1 \
-    --early_stopping_patience 0 \
+    --load_best_model_at_end \
+    --metric_for_best_model eval_mcc \
+    --early_stopping_patience 3 \
+    --save_total_limit 2 \
     --seed $SEED
 
 EXIT_CODE_BASELINE=$?
@@ -129,7 +130,6 @@ echo "Finished at: $(date)" | tee -a "${RESULTS_FILE}"
 echo "Exit code: ${EXIT_CODE_BASELINE}" | tee -a "${RESULTS_FILE}"
 echo "Time: ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) minutes)" | tee -a "${RESULTS_FILE}"
 
-# Extract peak memory from training summary if available
 if [ -f "${OUTPUT_DIR_BASELINE}/training_summary.json" ]; then
     MEMORY_BASELINE=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_BASELINE}/training_summary.json')); print(f\"{d.get('peak_gpu_memory_mb', 0):.0f}\")")
     echo "Peak GPU memory: ${MEMORY_BASELINE} MB" | tee -a "${RESULTS_FILE}"
@@ -138,7 +138,7 @@ fi
 echo "" | tee -a "${RESULTS_FILE}"
 
 # ============================================================
-# TEST 2: bf16 (recommended for A100)
+# TEST 2: fp16 (matching original working config)
 # ============================================================
 
 echo "============================================================" | tee -a "${RESULTS_FILE}"
@@ -160,12 +160,18 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --max_length $MAX_LENGTH \
     --per_device_train_batch_size $BATCH_SIZE \
     --per_device_eval_batch_size 16 \
+    --gradient_accumulation_steps 1 \
     --num_train_epochs $EPOCHS \
     --learning_rate $LEARNING_RATE \
+    --weight_decay 0.01 \
+    --warmup_ratio 0.1 \
+    --logging_steps 100 \
     --eval_strategy epoch \
     --save_strategy epoch \
-    --save_total_limit 1 \
-    --early_stopping_patience 0 \
+    --load_best_model_at_end \
+    --metric_for_best_model eval_mcc \
+    --early_stopping_patience 3 \
+    --save_total_limit 2 \
     --fp16 \
     --seed $SEED
 
@@ -177,66 +183,9 @@ echo "Finished at: $(date)" | tee -a "${RESULTS_FILE}"
 echo "Exit code: ${EXIT_CODE_FP16}" | tee -a "${RESULTS_FILE}"
 echo "Time: ${ELAPSED_FP16} seconds ($(echo "scale=1; ${ELAPSED_FP16}/60" | bc) minutes)" | tee -a "${RESULTS_FILE}"
 
-# Extract peak memory from training summary if available
 if [ -f "${OUTPUT_DIR_FP16}/training_summary.json" ]; then
     MEMORY_FP16=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_FP16}/training_summary.json')); print(f\"{d.get('peak_gpu_memory_mb', 0):.0f}\")")
     echo "Peak GPU memory: ${MEMORY_FP16} MB" | tee -a "${RESULTS_FILE}"
-fi
-
-echo "" | tee -a "${RESULTS_FILE}"
-
-# ============================================================
-# TEST 3: bf16 + step-based eval + early stopping
-# ============================================================
-
-echo "============================================================" | tee -a "${RESULTS_FILE}"
-echo "TEST 3: fp16 + step-based eval + early stopping" | tee -a "${RESULTS_FILE}"
-echo "============================================================" | tee -a "${RESULTS_FILE}"
-
-OUTPUT_DIR_EARLY="${OUTPUT_BASE}/fp16_early_stop_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "${OUTPUT_DIR_EARLY}"
-
-echo "Output: ${OUTPUT_DIR_EARLY}" | tee -a "${RESULTS_FILE}"
-echo "Started at: $(date)" | tee -a "${RESULTS_FILE}"
-echo "Config: 10 epochs max, eval every 100 steps, patience=3, batch=1" | tee -a "${RESULTS_FILE}"
-
-START_TIME=$(date +%s)
-
-python "${SCRIPT_DIR}/finetune_nt_phage.py" \
-    --model_name "$MODEL_NAME" \
-    --dataset_dir "$DATASET_DIR" \
-    --output_dir "$OUTPUT_DIR_EARLY" \
-    --max_length $MAX_LENGTH \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --num_train_epochs 10 \
-    --learning_rate $LEARNING_RATE \
-    --eval_strategy steps \
-    --eval_steps 100 \
-    --save_strategy steps \
-    --save_steps 100 \
-    --early_stopping_patience 3 \
-    --fp16 \
-    --seed $SEED
-
-EXIT_CODE_EARLY=$?
-END_TIME=$(date +%s)
-ELAPSED_EARLY=$((END_TIME - START_TIME))
-
-echo "Finished at: $(date)" | tee -a "${RESULTS_FILE}"
-echo "Exit code: ${EXIT_CODE_EARLY}" | tee -a "${RESULTS_FILE}"
-echo "Time: ${ELAPSED_EARLY} seconds ($(echo "scale=1; ${ELAPSED_EARLY}/60" | bc) minutes)" | tee -a "${RESULTS_FILE}"
-
-# Check how many epochs actually ran (early stopping test)
-if [ -f "${OUTPUT_DIR_EARLY}/training_summary.json" ]; then
-    ACTUAL_EPOCHS=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_EARLY}/training_summary.json')); print(f\"{d.get('actual_epochs', 'N/A')}\")")
-    MEMORY_EARLY=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_EARLY}/training_summary.json')); print(f\"{d.get('peak_gpu_memory_mb', 0):.0f}\")")
-    echo "Actual epochs completed: ${ACTUAL_EPOCHS} (max was 10)" | tee -a "${RESULTS_FILE}"
-    echo "Peak GPU memory: ${MEMORY_EARLY} MB" | tee -a "${RESULTS_FILE}"
-
-    if [ "${ACTUAL_EPOCHS}" != "10" ] && [ "${ACTUAL_EPOCHS}" != "N/A" ]; then
-        echo "*** EARLY STOPPING TRIGGERED! ***" | tee -a "${RESULTS_FILE}"
-    fi
 fi
 
 echo "" | tee -a "${RESULTS_FILE}"
@@ -249,32 +198,17 @@ echo "============================================================" | tee -a "${
 echo "BENCHMARK SUMMARY" | tee -a "${RESULTS_FILE}"
 echo "============================================================" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
-echo "Test 1 & 2: ${EPOCHS} epoch, batch_size=${BATCH_SIZE}, max_length=${MAX_LENGTH}" | tee -a "${RESULTS_FILE}"
-echo "Test 3: fp16, 10 epochs max, batch=1, eval/100 steps, patience=3" | tee -a "${RESULTS_FILE}"
+echo "Configuration: ${EPOCHS} epochs, batch_size=${BATCH_SIZE}, max_length=${MAX_LENGTH}" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
 echo "Timing Results:" | tee -a "${RESULTS_FILE}"
-echo "  1. Baseline (fp32):           ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
-echo "  2. fp16:                      ${ELAPSED_FP16} seconds ($(echo "scale=1; ${ELAPSED_FP16}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
-echo "  3. fp16 + early stopping:     ${ELAPSED_EARLY} seconds ($(echo "scale=1; ${ELAPSED_EARLY}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
+echo "  1. Baseline (fp32): ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
+echo "  2. fp16:            ${ELAPSED_FP16} seconds ($(echo "scale=1; ${ELAPSED_FP16}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
 
 # Calculate speedup
-if [ ${ELAPSED_FP16} -gt 0 ]; then
+if [ ${ELAPSED_FP16} -gt 0 ] && [ ${ELAPSED_BASELINE} -gt 0 ]; then
     SPEEDUP=$(echo "scale=2; ${ELAPSED_BASELINE} / ${ELAPSED_FP16}" | bc)
     echo "" | tee -a "${RESULTS_FILE}"
     echo "Speedup (fp16 vs fp32): ${SPEEDUP}x" | tee -a "${RESULTS_FILE}"
-fi
-
-echo "" | tee -a "${RESULTS_FILE}"
-echo "Early Stopping Test:" | tee -a "${RESULTS_FILE}"
-if [ -f "${OUTPUT_DIR_EARLY}/training_summary.json" ]; then
-    echo "  Epochs completed: ${ACTUAL_EPOCHS} / 10 max" | tee -a "${RESULTS_FILE}"
-    if [ "${ACTUAL_EPOCHS}" != "10" ] && [ "${ACTUAL_EPOCHS}" != "N/A" ]; then
-        echo "  Status: WORKING - stopped early!" | tee -a "${RESULTS_FILE}"
-    else
-        echo "  Status: Did not trigger (model may need more epochs to converge)" | tee -a "${RESULTS_FILE}"
-    fi
-else
-    echo "  Status: Could not determine (training_summary.json not found)" | tee -a "${RESULTS_FILE}"
 fi
 
 echo "" | tee -a "${RESULTS_FILE}"
