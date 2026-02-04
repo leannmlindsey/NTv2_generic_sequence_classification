@@ -98,6 +98,123 @@ After training, comprehensive test metrics are saved to `test_results.json`:
 
 ---
 
+## Training Optimization
+
+Speed up training with mixed precision, gradient checkpointing, and proper early stopping configuration.
+
+### Quick Start (Optimized Training)
+
+```bash
+# Recommended for A100/H100 GPUs
+python finetune_nt_phage.py \
+    --dataset_dir="/path/to/data" \
+    --output_dir="./output" \
+    --bf16 \
+    --per_device_train_batch_size=16 \
+    --eval_strategy=steps \
+    --eval_steps=500 \
+    --num_train_epochs=10 \
+    --early_stopping_patience=3
+
+# For V100 or older GPUs
+python finetune_nt_phage.py \
+    --dataset_dir="/path/to/data" \
+    --output_dir="./output" \
+    --fp16 \
+    --per_device_train_batch_size=8 \
+    --eval_strategy=steps \
+    --eval_steps=500 \
+    --num_train_epochs=10 \
+    --early_stopping_patience=3
+```
+
+### Optimization Options
+
+| Option | Flag | Expected Speedup | Notes |
+|--------|------|-----------------|-------|
+| **bf16 precision** | `--bf16` | 2-3x | Recommended for A100/H100 |
+| **fp16 precision** | `--fp16` | 2-3x | For V100/older GPUs |
+| **TF32 matmul** | `--tf32` | 5-10% | Ampere GPUs only |
+| **Fused optimizer** | `--optim adamw_torch_fused` | 5-15% | Requires PyTorch 2.0+ |
+| **Gradient checkpointing** | `--gradient_checkpointing` | Enables larger batches | ~20% slower per step |
+
+### Early Stopping Configuration
+
+**Important:** The default configuration (`eval_strategy=epoch` with 3 epochs and `patience=3`) means early stopping **never triggers**. Fix this by using step-based evaluation:
+
+```bash
+# Correct early stopping configuration
+python finetune_nt_phage.py \
+    --eval_strategy=steps \
+    --eval_steps=500 \
+    --num_train_epochs=10 \
+    --early_stopping_patience=3
+```
+
+This evaluates every 500 steps and stops if no improvement for 3 consecutive evaluations.
+
+### Long Sequences (4k/8k)
+
+For longer sequences, use gradient checkpointing to reduce memory:
+
+```bash
+# 4k sequences
+python finetune_nt_phage.py \
+    --dataset_dir="/path/to/data" \
+    --output_dir="./output" \
+    --max_length=4096 \
+    --bf16 \
+    --gradient_checkpointing \
+    --per_device_train_batch_size=8 \
+    --gradient_accumulation_steps=2
+
+# 8k sequences
+python finetune_nt_phage.py \
+    --dataset_dir="/path/to/data" \
+    --output_dir="./output" \
+    --max_length=8192 \
+    --bf16 \
+    --gradient_checkpointing \
+    --per_device_train_batch_size=4 \
+    --gradient_accumulation_steps=4
+```
+
+### Recommended Batch Sizes by Sequence Length
+
+| Sequence Length | GPU | Batch Size | Grad Accum | Gradient Checkpointing |
+|-----------------|-----|------------|------------|------------------------|
+| 2k (2048) | A100 | 16 | 1 | No |
+| 2k (2048) | V100 | 8 | 2 | No |
+| 4k (4096) | A100 | 8 | 2 | Yes |
+| 4k (4096) | V100 | 4 | 4 | Yes |
+| 8k (8192) | A100 | 4 | 4 | Yes |
+| 8k (8192) | V100 | 2 | 8 | Yes |
+
+### Training Benchmark
+
+Run the benchmark script to find the optimal configuration for your hardware:
+
+```bash
+# Edit DATASET_DIR and OUTPUT_BASE in the script, then:
+bash slurm_scripts/benchmark_training.sh
+```
+
+This tests multiple configurations (fp32, fp16, bf16, gradient checkpointing, etc.) and generates a comparison report.
+
+### Optimized Training Wrapper
+
+Use the wrapper script for automatic configuration based on sequence length and GPU:
+
+```bash
+# Edit configuration in the script
+vim slurm_scripts/wrapper_run_training_optimized.sh
+
+# Run training
+bash slurm_scripts/wrapper_run_training_optimized.sh
+```
+
+---
+
 ## Embedding Analysis
 
 Extract embeddings and evaluate their quality with linear probes, silhouette scores, PCA visualization, and a 3-layer NN.
@@ -424,10 +541,24 @@ bash slurm_scripts/run_inference_interactive.sh
 | `--dataset_dir` | (required) | Directory with train/dev/test CSVs |
 | `--max_length` | 2048 | Max sequence length in tokens |
 | `--per_device_train_batch_size` | 8 | Training batch size |
+| `--gradient_accumulation_steps` | 1 | Gradient accumulation steps |
 | `--learning_rate` | 3e-5 | Learning rate |
 | `--num_train_epochs` | 3 | Number of training epochs |
-| `--early_stopping_patience` | 3 | Early stopping patience |
+| `--eval_strategy` | epoch | Evaluation strategy: epoch, steps, or no |
+| `--eval_steps` | 500 | Evaluate every N steps (if eval_strategy=steps) |
+| `--early_stopping_patience` | 3 | Early stopping patience (0 to disable) |
 | `--seed` | 42 | Random seed |
+
+**Optimization Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--fp16` | false | Use fp16 mixed precision (for V100/older GPUs) |
+| `--bf16` | false | Use bf16 mixed precision (recommended for A100/H100) |
+| `--tf32` | false | Enable TF32 for matmul (Ampere GPUs, slight speedup) |
+| `--gradient_checkpointing` | false | Enable gradient checkpointing (saves memory, ~20% slower) |
+| `--optim` | adamw_torch | Optimizer: adamw_torch, adamw_torch_fused, adafactor |
+| `--torch_compile` | false | Use torch.compile() (experimental) |
 
 ### Embedding Analysis Parameters
 

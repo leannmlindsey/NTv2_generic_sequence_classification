@@ -3,7 +3,15 @@
 Fine-tuning Nucleotide Transformer v2 for binary sequence classification.
 Based on official HuggingFace notebooks for NT fine-tuning.
 
+Optimization Features:
+- Mixed precision training (fp16/bf16) for 2-3x speedup
+- Gradient checkpointing for longer sequences (4k/8k)
+- Configurable early stopping with step-based evaluation
+- TF32 support for Ampere GPUs
+- Fused AdamW optimizer option
+
 Usage:
+    # Basic training
     python finetune_nt_phage.py \
         --model_name InstaDeepAI/nucleotide-transformer-v2-500m-multi-species \
         --dataset_dir /path/to/data \
@@ -11,6 +19,27 @@ Usage:
         --max_length 2048 \
         --per_device_train_batch_size 8 \
         --num_train_epochs 3
+
+    # Optimized training (recommended)
+    python finetune_nt_phage.py \
+        --dataset_dir /path/to/data \
+        --output_dir ./output \
+        --bf16 \
+        --per_device_train_batch_size 16 \
+        --eval_strategy steps \
+        --eval_steps 500 \
+        --num_train_epochs 10 \
+        --early_stopping_patience 3
+
+    # Long sequences (4k/8k) with gradient checkpointing
+    python finetune_nt_phage.py \
+        --dataset_dir /path/to/data \
+        --output_dir ./output \
+        --max_length 4096 \
+        --bf16 \
+        --gradient_checkpointing \
+        --per_device_train_batch_size 4 \
+        --gradient_accumulation_steps 4
 """
 
 import argparse
@@ -75,17 +104,38 @@ def parse_args():
     parser.add_argument("--num_train_epochs", type=int, default=3)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--logging_steps", type=int, default=100)
-    parser.add_argument("--eval_strategy", type=str, default="epoch")
+    parser.add_argument("--eval_strategy", type=str, default="epoch",
+                        help="Evaluation strategy: 'epoch', 'steps', or 'no'")
+    parser.add_argument("--eval_steps", type=int, default=500,
+                        help="Evaluate every N steps (only used if eval_strategy='steps')")
     parser.add_argument("--save_strategy", type=str, default="epoch")
+    parser.add_argument("--save_steps", type=int, default=500,
+                        help="Save checkpoint every N steps (only used if save_strategy='steps')")
     parser.add_argument("--save_total_limit", type=int, default=2)
     parser.add_argument("--load_best_model_at_end", action="store_true", default=True)
     parser.add_argument("--metric_for_best_model", type=str, default="eval_mcc")
-    parser.add_argument("--early_stopping_patience", type=int, default=3)
-    parser.add_argument("--fp16", action="store_true", default=False)
-    parser.add_argument("--bf16", action="store_true", default=False)
+    parser.add_argument("--early_stopping_patience", type=int, default=3,
+                        help="Stop if no improvement for N evaluations (0 to disable)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dataloader_num_workers", type=int, default=4)
-    
+
+    # Precision and optimization arguments
+    parser.add_argument("--fp16", action="store_true", default=False,
+                        help="Use fp16 mixed precision (for V100 and older GPUs)")
+    parser.add_argument("--bf16", action="store_true", default=False,
+                        help="Use bf16 mixed precision (recommended for A100/H100)")
+    parser.add_argument("--tf32", action="store_true", default=False,
+                        help="Enable TF32 for matmul (Ampere GPUs only, slight speedup)")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=False,
+                        help="Enable gradient checkpointing to reduce memory (allows larger batches/sequences)")
+    parser.add_argument("--optim", type=str, default="adamw_torch",
+                        choices=["adamw_torch", "adamw_torch_fused", "adamw_apex_fused", "adafactor"],
+                        help="Optimizer to use (adamw_torch_fused is faster on newer GPUs)")
+    parser.add_argument("--torch_compile", action="store_true", default=False,
+                        help="Use torch.compile() for potential speedup (experimental)")
+    parser.add_argument("--dataloader_pin_memory", action="store_true", default=True,
+                        help="Pin memory for faster GPU transfer")
+
     return parser.parse_args()
 
 
@@ -202,10 +252,15 @@ def compute_metrics(eval_pred):
 
 def main():
     args = parse_args()
-    
+
     # Set seed for reproducibility
     set_seed(args.seed)
-    
+
+    # Enable TF32 for Ampere GPUs (slight speedup for matmul)
+    if args.tf32 and torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
     print("=" * 60)
     print("Nucleotide Transformer v2 Fine-tuning")
     print("=" * 60)
@@ -214,15 +269,33 @@ def main():
     print(f"Output: {args.output_dir}")
     print(f"Max length: {args.max_length}")
     print(f"Batch size: {args.per_device_train_batch_size}")
+    print(f"Gradient accumulation: {args.gradient_accumulation_steps}")
+    print(f"Effective batch size: {args.per_device_train_batch_size * args.gradient_accumulation_steps}")
     print(f"Learning rate: {args.learning_rate}")
     print(f"Epochs: {args.num_train_epochs}")
+    print(f"Eval strategy: {args.eval_strategy}" + (f" (every {args.eval_steps} steps)" if args.eval_strategy == "steps" else ""))
+    print(f"Early stopping patience: {args.early_stopping_patience}")
     print(f"Seed: {args.seed}")
+    print("-" * 60)
+    print("Optimizations:")
+    print(f"  fp16: {args.fp16}")
+    print(f"  bf16: {args.bf16}")
+    print(f"  tf32: {args.tf32}")
+    print(f"  Gradient checkpointing: {args.gradient_checkpointing}")
+    print(f"  Optimizer: {args.optim}")
+    print(f"  torch.compile: {args.torch_compile}")
     print("=" * 60)
-    
+
     # Check GPU
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        if args.bf16:
+            # Check bf16 support
+            if torch.cuda.get_device_capability()[0] >= 8:
+                print("  bf16 supported (Ampere or newer)")
+            else:
+                print("  WARNING: bf16 may not be fully supported on this GPU")
     else:
         print("WARNING: No GPU detected!")
     
@@ -240,7 +313,22 @@ def main():
         num_labels=2,  # Binary classification
         trust_remote_code=True,
     )
-    
+
+    # Enable gradient checkpointing if requested (saves memory, ~20% slower)
+    if args.gradient_checkpointing:
+        print("Enabling gradient checkpointing...")
+        model.gradient_checkpointing_enable()
+
+    # Apply torch.compile if requested (experimental)
+    if args.torch_compile:
+        print("Applying torch.compile()...")
+        try:
+            model = torch.compile(model, mode="default")
+            print("  torch.compile() applied successfully")
+        except Exception as e:
+            print(f"  WARNING: torch.compile() failed: {e}")
+            print("  Continuing without torch.compile()")
+
     # Print model info
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -278,7 +366,9 @@ def main():
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         eval_strategy=args.eval_strategy,
+        eval_steps=args.eval_steps if args.eval_strategy == "steps" else None,
         save_strategy=args.save_strategy,
+        save_steps=args.save_steps if args.save_strategy == "steps" else None,
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
@@ -293,7 +383,10 @@ def main():
         save_total_limit=args.save_total_limit,
         fp16=args.fp16,
         bf16=args.bf16,
+        optim=args.optim,
         dataloader_num_workers=args.dataloader_num_workers,
+        dataloader_pin_memory=args.dataloader_pin_memory,
+        gradient_checkpointing=args.gradient_checkpointing,
         seed=args.seed,
         report_to="none",  # Disable wandb/tensorboard by default
     )
@@ -317,8 +410,17 @@ def main():
     
     # Train
     print("\nStarting training...")
+    import time
+    train_start_time = time.time()
     train_result = trainer.train()
-    
+    train_elapsed = time.time() - train_start_time
+
+    # Report training time and memory
+    print(f"\nTraining completed in {train_elapsed:.1f} seconds ({train_elapsed/60:.1f} minutes)")
+    if torch.cuda.is_available():
+        peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+        print(f"Peak GPU memory: {peak_memory_mb:.1f} MB ({peak_memory_mb/1024:.2f} GB)")
+
     # Save model
     print("\nSaving model...")
     trainer.save_model(args.output_dir)
@@ -358,8 +460,43 @@ def main():
             else:
                 print(f"  {key}: {value}")
     
+    # Save training summary with timing and configuration
+    training_summary = {
+        "model_name": args.model_name,
+        "dataset_dir": args.dataset_dir,
+        "output_dir": args.output_dir,
+        "max_length": args.max_length,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "effective_batch_size": args.per_device_train_batch_size * args.gradient_accumulation_steps,
+        "learning_rate": args.learning_rate,
+        "num_train_epochs": args.num_train_epochs,
+        "actual_epochs": train_result.metrics.get("epoch", args.num_train_epochs),
+        "total_steps": train_result.metrics.get("total_flos", 0),
+        "training_time_seconds": train_elapsed,
+        "training_time_minutes": train_elapsed / 60,
+        "seed": args.seed,
+        "optimizations": {
+            "fp16": args.fp16,
+            "bf16": args.bf16,
+            "tf32": args.tf32,
+            "gradient_checkpointing": args.gradient_checkpointing,
+            "optimizer": args.optim,
+            "torch_compile": args.torch_compile,
+        },
+    }
+    if torch.cuda.is_available():
+        training_summary["gpu_name"] = torch.cuda.get_device_name(0)
+        training_summary["peak_gpu_memory_mb"] = torch.cuda.max_memory_allocated() / (1024 * 1024)
+
+    summary_path = os.path.join(args.output_dir, "training_summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(training_summary, f, indent=2)
+    print(f"\nTraining summary saved to: {summary_path}")
+
     print("\nTraining complete!")
     print(f"Model saved to: {args.output_dir}")
+    print(f"Total training time: {train_elapsed/60:.1f} minutes")
 
 
 if __name__ == "__main__":
