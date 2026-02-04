@@ -2,12 +2,13 @@
 
 # Optimized Training Wrapper for NT-v2
 #
-# This wrapper provides recommended configurations for different
-# sequence lengths and hardware.
+# This wrapper submits a SLURM job with recommended configurations for
+# different sequence lengths and hardware.
 #
 # Usage:
 #   1. Edit the configuration section below
-#   2. Run: bash wrapper_run_training_optimized.sh
+#   2. Run: bash wrapper_run_training_optimized.sh <SEED>
+#   Example: bash wrapper_run_training_optimized.sh 42
 
 #####################################################################
 # CONFIGURATION - Edit this section
@@ -43,7 +44,6 @@ GPU_TYPE="A100"
 LEARNING_RATE="3e-5"
 NUM_EPOCHS="10"  # Use more epochs with early stopping
 EARLY_STOPPING_PATIENCE="3"
-SEED=$1
 
 # === Evaluation Configuration ===
 # "steps" enables early stopping within epochs
@@ -52,85 +52,72 @@ EVAL_STRATEGY="steps"
 EVAL_STEPS="500"
 
 #####################################################################
-# AUTO-CONFIGURATION (based on settings above)
+# END CONFIGURATION
 #####################################################################
 
-SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification"
+# Get script directory
+SCRIPT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/slurm_scripts"
+TRAIN_SCRIPT="${SCRIPT_DIR}/run_optimized_train.sh"
 
-# Set precision based on GPU type
-if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-    PRECISION_FLAGS="--bf16 --tf32"
-    OPTIMIZER="adamw_torch_fused"
-else
-    PRECISION_FLAGS="--fp16"
-    OPTIMIZER="adamw_torch"
+# Parse command line arguments
+SEED=$1
+
+if [ -z "${SEED}" ]; then
+    echo "ERROR: SEED is required as first argument"
+    echo "Usage: bash wrapper_run_training_optimized.sh <SEED>"
+    echo "Example: bash wrapper_run_training_optimized.sh 42"
+    exit 1
 fi
 
-# Set batch size based on max_length (in tokens) and GPU
-# Note: NT-v2/ESM does NOT support gradient checkpointing
-case "${MAX_LENGTH}" in
-    512)  # For 2k nucleotide sequences
-        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="8"
-            GRAD_ACCUM="1"
-        else
-            BATCH_SIZE="4"
-            GRAD_ACCUM="2"
-        fi
-        ;;
-    1024)  # For 4k nucleotide sequences
-        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="1"
-            GRAD_ACCUM="1"
-        else
-            BATCH_SIZE="1"
-            GRAD_ACCUM="1"
-        fi
-        ;;
-    2048)  # For 8k nucleotide sequences
-        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="1"
-            GRAD_ACCUM="1"
-        else
-            BATCH_SIZE="1"
-            GRAD_ACCUM="1"
-        fi
-        ;;
-    *)
-        echo "ERROR: Unsupported MAX_LENGTH: ${MAX_LENGTH}"
-        echo "Supported values: 512 (2k seq), 1024 (4k seq), 2048 (8k seq)"
-        exit 1
-        ;;
-esac
-
-EFFECTIVE_BATCH_SIZE=$((BATCH_SIZE * GRAD_ACCUM))
-
-#####################################################################
-# VALIDATION
-#####################################################################
-
+# Validate configuration
 if [ ! -d "${DATASET_DIR}" ]; then
     echo "ERROR: Dataset directory not found: ${DATASET_DIR}"
     exit 1
 fi
 
+if [ ! -f "${TRAIN_SCRIPT}" ]; then
+    echo "ERROR: Training script not found: ${TRAIN_SCRIPT}"
+    exit 1
+fi
+
+# Create output directory
 mkdir -p "${OUTPUT_DIR}"
 
-#####################################################################
-# PRINT CONFIGURATION
-#####################################################################
+# Calculate effective batch size for display
+case "${MAX_LENGTH}" in
+    512)
+        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
+            BATCH_SIZE="8"; GRAD_ACCUM="1"
+        else
+            BATCH_SIZE="4"; GRAD_ACCUM="2"
+        fi
+        ;;
+    1024|2048)
+        BATCH_SIZE="1"; GRAD_ACCUM="1"
+        ;;
+esac
+EFFECTIVE_BATCH_SIZE=$((BATCH_SIZE * GRAD_ACCUM))
+
+# Set precision for display
+if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
+    PRECISION="bf16 + tf32"
+else
+    PRECISION="fp16"
+fi
 
 echo "=========================================="
-echo "NT-v2 Optimized Training"
+echo "Submitting NT-v2 Optimized Training Job"
 echo "=========================================="
 echo ""
 echo "Dataset: ${DATASET_DIR}"
 echo "Output: ${OUTPUT_DIR}"
 echo ""
-echo "Sequence length: ${MAX_LENGTH}"
-echo "GPU type: ${GPU_TYPE}"
+echo "Configuration:"
+echo "  Max length: ${MAX_LENGTH} tokens"
+echo "  GPU type: ${GPU_TYPE}"
+echo "  Seed: ${SEED}"
 echo ""
-echo "Training configuration:"
+echo "Training parameters:"
 echo "  Batch size: ${BATCH_SIZE}"
 echo "  Gradient accumulation: ${GRAD_ACCUM}"
 echo "  Effective batch size: ${EFFECTIVE_BATCH_SIZE}"
@@ -139,8 +126,7 @@ echo "  Max epochs: ${NUM_EPOCHS}"
 echo "  Early stopping patience: ${EARLY_STOPPING_PATIENCE}"
 echo ""
 echo "Optimizations:"
-echo "  Precision: ${PRECISION_FLAGS}"
-echo "  Optimizer: ${OPTIMIZER}"
+echo "  Precision: ${PRECISION}"
 echo ""
 echo "Evaluation:"
 echo "  Strategy: ${EVAL_STRATEGY}"
@@ -150,39 +136,21 @@ fi
 echo "=========================================="
 echo ""
 
-#####################################################################
-# RUN TRAINING
-#####################################################################
+# Submit SLURM job
+JOB_ID=$(sbatch \
+    --job-name="nt_train_s${SEED}" \
+    --output="${OUTPUT_DIR}/slurm_train_s${SEED}_%j.out" \
+    --error="${OUTPUT_DIR}/slurm_train_s${SEED}_%j.err" \
+    --export=ALL,DATASET_DIR="${DATASET_DIR}",OUTPUT_DIR="${OUTPUT_DIR}",MAX_LENGTH="${MAX_LENGTH}",GPU_TYPE="${GPU_TYPE}",LEARNING_RATE="${LEARNING_RATE}",NUM_EPOCHS="${NUM_EPOCHS}",EARLY_STOPPING_PATIENCE="${EARLY_STOPPING_PATIENCE}",EVAL_STRATEGY="${EVAL_STRATEGY}",EVAL_STEPS="${EVAL_STEPS}",SEED="${SEED}" \
+    "${TRAIN_SCRIPT}" | awk '{print $NF}')
 
-cd "${SCRIPT_DIR}"
-
-python finetune_nt_phage.py \
-    --dataset_dir "${DATASET_DIR}" \
-    --output_dir "${OUTPUT_DIR}" \
-    --max_length ${MAX_LENGTH} \
-    --per_device_train_batch_size ${BATCH_SIZE} \
-    --gradient_accumulation_steps ${GRAD_ACCUM} \
-    --learning_rate ${LEARNING_RATE} \
-    --num_train_epochs ${NUM_EPOCHS} \
-    --eval_strategy ${EVAL_STRATEGY} \
-    --eval_steps ${EVAL_STEPS} \
-    --save_strategy ${EVAL_STRATEGY} \
-    --save_steps ${EVAL_STEPS} \
-    --early_stopping_patience ${EARLY_STOPPING_PATIENCE} \
-    --optim ${OPTIMIZER} \
-    --seed ${SEED} \
-    ${PRECISION_FLAGS}
-
-EXIT_CODE=$?
-
+echo "=========================================="
+echo "Job Submitted"
+echo "=========================================="
+echo "Job ID: ${JOB_ID}"
+echo "Job name: nt_train_s${SEED}"
 echo ""
+echo "Monitor with: squeue -u \$USER"
+echo "Output log: ${OUTPUT_DIR}/slurm_train_s${SEED}_${JOB_ID}.out"
+echo "Error log: ${OUTPUT_DIR}/slurm_train_s${SEED}_${JOB_ID}.err"
 echo "=========================================="
-if [ ${EXIT_CODE} -eq 0 ]; then
-    echo "Training completed successfully"
-    echo "Model saved to: ${OUTPUT_DIR}"
-else
-    echo "Training failed with exit code: ${EXIT_CODE}"
-fi
-echo "=========================================="
-
-exit ${EXIT_CODE}
