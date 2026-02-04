@@ -80,7 +80,20 @@ if [ ! -f "${TRAIN_SCRIPT}" ]; then
     exit 1
 fi
 
-# Create output directory
+# Create run-specific output directory to avoid overwrites
+# Format: nt_lambda_filtered_{seq_len}_{seed}_{lr}_{timestamp}
+OUTPUT_DIR_BASE="${OUTPUT_DIR}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+# Determine sequence length label for directory name
+case "${MAX_LENGTH}" in
+    512)  SEQ_LEN="2k" ;;
+    1024) SEQ_LEN="4k" ;;
+    2048) SEQ_LEN="8k" ;;
+esac
+
+RUN_NAME="nt_lambda_filtered_${SEQ_LEN}_${SEED}_${LEARNING_RATE}_${TIMESTAMP}"
+OUTPUT_DIR="${OUTPUT_DIR_BASE}/${RUN_NAME}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Calculate effective batch size for display
@@ -110,6 +123,8 @@ echo "Submitting NT-v2 Optimized Training Job"
 echo "=========================================="
 echo ""
 echo "Dataset: ${DATASET_DIR}"
+echo "Output base: ${OUTPUT_DIR_BASE}"
+echo "Run name: ${RUN_NAME}"
 echo "Output: ${OUTPUT_DIR}"
 echo ""
 echo "Configuration:"
