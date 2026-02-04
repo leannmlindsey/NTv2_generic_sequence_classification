@@ -15,10 +15,12 @@
 
 # === REQUIRED: Dataset Directory ===
 # Directory containing train.csv, dev.csv, test.csv
-DATASET_DIR="/path/to/your/data"
+#DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/2k"
+DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/4k"
+#DATASET_DIR="/home/lindseylm/lindseylm/lambda_final/merged_datasets_filtered/8k"
 
 # === REQUIRED: Output Directory ===
-OUTPUT_DIR="/path/to/output"
+OUTPUT_DIR="/data/lindseylm/GLM_EVALUATIONS/MODELS/NTv2/NTv2_generic_sequence_classification/output/filtered/4k"
 
 # === Sequence Length Configuration ===
 # MAX_LENGTH is in TOKENS, not nucleotides!
@@ -27,7 +29,9 @@ OUTPUT_DIR="/path/to/output"
 #   - 2k nucleotides (~341 tokens)  -> MAX_LENGTH=512
 #   - 4k nucleotides (~667 tokens)  -> MAX_LENGTH=1024
 #   - 8k nucleotides (~1333 tokens) -> MAX_LENGTH=2048
-MAX_LENGTH="512"
+#MAX_LENGTH="512"
+MAX_LENGTH="1024"
+#MAX_LENGTH="2048"
 
 # === Hardware Configuration ===
 # Set based on your GPU:
@@ -39,7 +43,7 @@ GPU_TYPE="A100"
 LEARNING_RATE="3e-5"
 NUM_EPOCHS="10"  # Use more epochs with early stopping
 EARLY_STOPPING_PATIENCE="3"
-SEED="42"
+SEED=$1
 
 # === Evaluation Configuration ===
 # "steps" enables early stopping within epochs
