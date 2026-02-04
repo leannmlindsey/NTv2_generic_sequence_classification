@@ -116,7 +116,8 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --num_train_epochs $EPOCHS \
     --learning_rate $LEARNING_RATE \
     --eval_strategy epoch \
-    --save_strategy no \
+    --save_strategy epoch \
+    --save_total_limit 1 \
     --early_stopping_patience 0 \
     --seed $SEED
 
@@ -162,7 +163,8 @@ python "${SCRIPT_DIR}/finetune_nt_phage.py" \
     --num_train_epochs $EPOCHS \
     --learning_rate $LEARNING_RATE \
     --eval_strategy epoch \
-    --save_strategy no \
+    --save_strategy epoch \
+    --save_total_limit 1 \
     --early_stopping_patience 0 \
     --bf16 \
     --seed $SEED
