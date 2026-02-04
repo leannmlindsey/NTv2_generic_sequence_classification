@@ -184,6 +184,62 @@ fi
 echo "" | tee -a "${RESULTS_FILE}"
 
 # ============================================================
+# TEST 3: bf16 + step-based eval + early stopping
+# ============================================================
+
+echo "============================================================" | tee -a "${RESULTS_FILE}"
+echo "TEST 3: bf16 + step-based eval + early stopping" | tee -a "${RESULTS_FILE}"
+echo "============================================================" | tee -a "${RESULTS_FILE}"
+
+OUTPUT_DIR_EARLY="${OUTPUT_BASE}/bf16_early_stop_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "${OUTPUT_DIR_EARLY}"
+
+echo "Output: ${OUTPUT_DIR_EARLY}" | tee -a "${RESULTS_FILE}"
+echo "Started at: $(date)" | tee -a "${RESULTS_FILE}"
+echo "Config: 10 epochs max, eval every 100 steps, patience=3" | tee -a "${RESULTS_FILE}"
+
+START_TIME=$(date +%s)
+
+python "${SCRIPT_DIR}/finetune_nt_phage.py" \
+    --model_name "$MODEL_NAME" \
+    --dataset_dir "$DATASET_DIR" \
+    --output_dir "$OUTPUT_DIR_EARLY" \
+    --max_length $MAX_LENGTH \
+    --per_device_train_batch_size $BATCH_SIZE \
+    --per_device_eval_batch_size 16 \
+    --num_train_epochs 10 \
+    --learning_rate $LEARNING_RATE \
+    --eval_strategy steps \
+    --eval_steps 100 \
+    --save_strategy steps \
+    --save_steps 100 \
+    --early_stopping_patience 3 \
+    --bf16 \
+    --seed $SEED
+
+EXIT_CODE_EARLY=$?
+END_TIME=$(date +%s)
+ELAPSED_EARLY=$((END_TIME - START_TIME))
+
+echo "Finished at: $(date)" | tee -a "${RESULTS_FILE}"
+echo "Exit code: ${EXIT_CODE_EARLY}" | tee -a "${RESULTS_FILE}"
+echo "Time: ${ELAPSED_EARLY} seconds ($(echo "scale=1; ${ELAPSED_EARLY}/60" | bc) minutes)" | tee -a "${RESULTS_FILE}"
+
+# Check how many epochs actually ran (early stopping test)
+if [ -f "${OUTPUT_DIR_EARLY}/training_summary.json" ]; then
+    ACTUAL_EPOCHS=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_EARLY}/training_summary.json')); print(f\"{d.get('actual_epochs', 'N/A')}\")")
+    MEMORY_EARLY=$(python3 -c "import json; d=json.load(open('${OUTPUT_DIR_EARLY}/training_summary.json')); print(f\"{d.get('peak_gpu_memory_mb', 0):.0f}\")")
+    echo "Actual epochs completed: ${ACTUAL_EPOCHS} (max was 10)" | tee -a "${RESULTS_FILE}"
+    echo "Peak GPU memory: ${MEMORY_EARLY} MB" | tee -a "${RESULTS_FILE}"
+
+    if [ "${ACTUAL_EPOCHS}" != "10" ] && [ "${ACTUAL_EPOCHS}" != "N/A" ]; then
+        echo "*** EARLY STOPPING TRIGGERED! ***" | tee -a "${RESULTS_FILE}"
+    fi
+fi
+
+echo "" | tee -a "${RESULTS_FILE}"
+
+# ============================================================
 # SUMMARY
 # ============================================================
 
@@ -191,17 +247,32 @@ echo "============================================================" | tee -a "${
 echo "BENCHMARK SUMMARY" | tee -a "${RESULTS_FILE}"
 echo "============================================================" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
-echo "Configuration: ${EPOCHS} epoch(s), batch_size=${BATCH_SIZE}, max_length=${MAX_LENGTH}" | tee -a "${RESULTS_FILE}"
+echo "Test 1 & 2: ${EPOCHS} epoch, batch_size=${BATCH_SIZE}, max_length=${MAX_LENGTH}" | tee -a "${RESULTS_FILE}"
+echo "Test 3: 10 epochs max, eval every 100 steps, early_stopping_patience=3" | tee -a "${RESULTS_FILE}"
 echo "" | tee -a "${RESULTS_FILE}"
-echo "Results:" | tee -a "${RESULTS_FILE}"
-echo "  Baseline (fp32): ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
-echo "  bf16:            ${ELAPSED_BF16} seconds ($(echo "scale=1; ${ELAPSED_BF16}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
+echo "Timing Results:" | tee -a "${RESULTS_FILE}"
+echo "  1. Baseline (fp32):           ${ELAPSED_BASELINE} seconds ($(echo "scale=1; ${ELAPSED_BASELINE}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
+echo "  2. bf16:                      ${ELAPSED_BF16} seconds ($(echo "scale=1; ${ELAPSED_BF16}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
+echo "  3. bf16 + early stopping:     ${ELAPSED_EARLY} seconds ($(echo "scale=1; ${ELAPSED_EARLY}/60" | bc) min)" | tee -a "${RESULTS_FILE}"
 
 # Calculate speedup
 if [ ${ELAPSED_BF16} -gt 0 ]; then
     SPEEDUP=$(echo "scale=2; ${ELAPSED_BASELINE} / ${ELAPSED_BF16}" | bc)
     echo "" | tee -a "${RESULTS_FILE}"
-    echo "Speedup (bf16 vs baseline): ${SPEEDUP}x" | tee -a "${RESULTS_FILE}"
+    echo "Speedup (bf16 vs fp32): ${SPEEDUP}x" | tee -a "${RESULTS_FILE}"
+fi
+
+echo "" | tee -a "${RESULTS_FILE}"
+echo "Early Stopping Test:" | tee -a "${RESULTS_FILE}"
+if [ -f "${OUTPUT_DIR_EARLY}/training_summary.json" ]; then
+    echo "  Epochs completed: ${ACTUAL_EPOCHS} / 10 max" | tee -a "${RESULTS_FILE}"
+    if [ "${ACTUAL_EPOCHS}" != "10" ] && [ "${ACTUAL_EPOCHS}" != "N/A" ]; then
+        echo "  Status: WORKING - stopped early!" | tee -a "${RESULTS_FILE}"
+    else
+        echo "  Status: Did not trigger (model may need more epochs to converge)" | tee -a "${RESULTS_FILE}"
+    fi
+else
+    echo "  Status: Could not determine (training_summary.json not found)" | tee -a "${RESULTS_FILE}"
 fi
 
 echo "" | tee -a "${RESULTS_FILE}"
