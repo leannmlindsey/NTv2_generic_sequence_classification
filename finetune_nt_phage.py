@@ -317,7 +317,13 @@ def main():
     # Enable gradient checkpointing if requested (saves memory, ~20% slower)
     if args.gradient_checkpointing:
         print("Enabling gradient checkpointing...")
-        model.gradient_checkpointing_enable()
+        try:
+            model.gradient_checkpointing_enable()
+            print("  Gradient checkpointing enabled")
+        except ValueError as e:
+            print(f"  WARNING: Gradient checkpointing not supported by this model: {e}")
+            print("  Continuing without gradient checkpointing...")
+            args.gradient_checkpointing = False
 
     # Apply torch.compile if requested (experimental)
     if args.torch_compile:

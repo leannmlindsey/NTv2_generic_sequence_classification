@@ -67,44 +67,15 @@ fi
 
 echo ""
 echo "============================================================"
-echo "TEST 2: 4k sequences, batch=1, bf16 + gradient_checkpointing"
-echo "============================================================"
-
-if [ -d "${DATASET_4K}" ]; then
-    python "${SCRIPT_DIR}/finetune_nt_phage.py" \
-        --dataset_dir "${DATASET_4K}" \
-        --output_dir "${OUTPUT_BASE}/test_4k_bf16_gc" \
-        --max_length 1024 \
-        --per_device_train_batch_size 1 \
-        --per_device_eval_batch_size 1 \
-        --num_train_epochs 1 \
-        --logging_steps 10 \
-        --eval_strategy no \
-        --save_strategy no \
-        --early_stopping_patience 0 \
-        --bf16 \
-        --gradient_checkpointing \
-        --seed 42 \
-        --dataloader_num_workers 2 \
-        2>&1 | head -100
-
-    echo "Exit code: $?"
-    echo "Peak GPU memory:"
-    nvidia-smi --query-gpu=memory.used --format=csv,noheader
-else
-    echo "Dataset not found: ${DATASET_4K}"
-fi
-
-echo ""
-echo "============================================================"
-echo "TEST 3: 8k sequences, batch=1, bf16 + gradient_checkpointing"
+echo "TEST 2: 8k sequences, batch=1, bf16"
 echo "============================================================"
 echo "Token count: ~1333 tokens (8000/6)"
+echo "NOTE: Gradient checkpointing NOT supported by NT-v2/ESM"
 
 if [ -d "${DATASET_8K}" ]; then
     python "${SCRIPT_DIR}/finetune_nt_phage.py" \
         --dataset_dir "${DATASET_8K}" \
-        --output_dir "${OUTPUT_BASE}/test_8k_bf16_gc" \
+        --output_dir "${OUTPUT_BASE}/test_8k_bf16" \
         --max_length 2048 \
         --per_device_train_batch_size 1 \
         --per_device_eval_batch_size 1 \
@@ -114,7 +85,6 @@ if [ -d "${DATASET_8K}" ]; then
         --save_strategy no \
         --early_stopping_patience 0 \
         --bf16 \
-        --gradient_checkpointing \
         --seed 42 \
         --dataloader_num_workers 2 \
         2>&1 | head -100
@@ -132,9 +102,12 @@ echo "============================================================"
 echo "SUMMARY"
 echo "============================================================"
 echo "Check output above for OOM errors and memory usage"
-echo "If 8k fails, you may need:"
-echo "  - Multiple GPUs with model parallelism"
-echo "  - Sequence chunking/sliding window approach"
-echo "  - DeepSpeed ZeRO optimization"
+echo ""
+echo "NOTE: NT-v2/ESM does NOT support gradient checkpointing!"
+echo ""
+echo "If 8k fails (OOM), options are:"
+echo "  - DeepSpeed ZeRO (offload optimizer/params to CPU)"
+echo "  - Multiple GPUs with FSDP or tensor parallelism"
+echo "  - Sequence chunking (split 8k into overlapping 4k segments)"
 echo "============================================================"
 echo "Job finished at: $(date)"
