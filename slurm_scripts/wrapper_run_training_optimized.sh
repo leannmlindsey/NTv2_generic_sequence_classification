@@ -21,8 +21,13 @@ DATASET_DIR="/path/to/your/data"
 OUTPUT_DIR="/path/to/output"
 
 # === Sequence Length Configuration ===
-# Options: 2048 (2k), 4096 (4k), or 8192 (8k)
-MAX_LENGTH="2048"
+# MAX_LENGTH is in TOKENS, not nucleotides!
+# NT-v2 uses 6-mer tokenization: tokens_needed = sequence_length / 6
+# Use a power of 2 large enough to fit your sequences:
+#   - 2k nucleotides (~341 tokens)  -> MAX_LENGTH=512
+#   - 4k nucleotides (~667 tokens)  -> MAX_LENGTH=1024
+#   - 8k nucleotides (~1333 tokens) -> MAX_LENGTH=2048
+MAX_LENGTH="512"
 
 # === Hardware Configuration ===
 # Set based on your GPU:
@@ -57,44 +62,39 @@ else
     OPTIMIZER="adamw_torch"
 fi
 
-# Set batch size based on sequence length and GPU
+# Set batch size based on max_length (in tokens) and GPU
+# Note: NT-v2/ESM does NOT support gradient checkpointing
 case "${MAX_LENGTH}" in
-    2048)
+    512)  # For 2k nucleotide sequences
         if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="16"
+            BATCH_SIZE="8"
             GRAD_ACCUM="1"
-            GRAD_CHECKPOINT=""
-        else
-            BATCH_SIZE="8"
-            GRAD_ACCUM="2"
-            GRAD_CHECKPOINT=""
-        fi
-        ;;
-    4096)
-        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="8"
-            GRAD_ACCUM="2"
-            GRAD_CHECKPOINT="--gradient_checkpointing"
         else
             BATCH_SIZE="4"
-            GRAD_ACCUM="4"
-            GRAD_CHECKPOINT="--gradient_checkpointing"
+            GRAD_ACCUM="2"
         fi
         ;;
-    8192)
+    1024)  # For 4k nucleotide sequences
         if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
-            BATCH_SIZE="4"
-            GRAD_ACCUM="4"
-            GRAD_CHECKPOINT="--gradient_checkpointing"
+            BATCH_SIZE="1"
+            GRAD_ACCUM="1"
         else
-            BATCH_SIZE="2"
-            GRAD_ACCUM="8"
-            GRAD_CHECKPOINT="--gradient_checkpointing"
+            BATCH_SIZE="1"
+            GRAD_ACCUM="1"
+        fi
+        ;;
+    2048)  # For 8k nucleotide sequences
+        if [ "${GPU_TYPE}" == "A100" ] || [ "${GPU_TYPE}" == "H100" ]; then
+            BATCH_SIZE="1"
+            GRAD_ACCUM="1"
+        else
+            BATCH_SIZE="1"
+            GRAD_ACCUM="1"
         fi
         ;;
     *)
         echo "ERROR: Unsupported MAX_LENGTH: ${MAX_LENGTH}"
-        echo "Supported values: 2048, 4096, 8192"
+        echo "Supported values: 512 (2k seq), 1024 (4k seq), 2048 (8k seq)"
         exit 1
         ;;
 esac
@@ -137,7 +137,6 @@ echo ""
 echo "Optimizations:"
 echo "  Precision: ${PRECISION_FLAGS}"
 echo "  Optimizer: ${OPTIMIZER}"
-echo "  Gradient checkpointing: ${GRAD_CHECKPOINT:-disabled}"
 echo ""
 echo "Evaluation:"
 echo "  Strategy: ${EVAL_STRATEGY}"
@@ -168,8 +167,7 @@ python finetune_nt_phage.py \
     --early_stopping_patience ${EARLY_STOPPING_PATIENCE} \
     --optim ${OPTIMIZER} \
     --seed ${SEED} \
-    ${PRECISION_FLAGS} \
-    ${GRAD_CHECKPOINT}
+    ${PRECISION_FLAGS}
 
 EXIT_CODE=$?
 
