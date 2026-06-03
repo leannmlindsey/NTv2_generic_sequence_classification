@@ -1,11 +1,15 @@
 #!/bin/bash
 #
-# Prefetch the HuggingFace model into the local cache so the OFFLINE SLURM jobs
-# can find it. RUN THIS ON A LOGIN NODE — Biowulf compute nodes have no internet,
+# Prefetch the HuggingFace model FILES into the local cache so the OFFLINE SLURM
+# jobs can find them. RUN ON A LOGIN NODE — Biowulf compute nodes have no internet
 # and the jobs run with HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1.
 #
-# Reads BASE_MODEL, HF_HOME, CONDA_ENV from lambda_replication.conf, downloads the
-# model into HF_HOME, then verifies it loads with offline mode on.
+# This only DOWNLOADS the repo files (snapshot_download); it does NOT instantiate
+# the model, so a model/transformers version mismatch won't abort the prefetch.
+#
+# Reads BASE_MODEL, HF_HOME, CONDA_ENV from lambda_replication.conf. Optionally
+# pin a model revision by exporting HF_REVISION=<commit-or-tag> before running
+# (useful if the repo's latest remote code is incompatible with the env).
 #
 # Usage:
 #   bash slurm_scripts/lambda_replication/prefetch_hf_cache.sh
@@ -19,11 +23,15 @@ conda activate "${CONDA_ENV}"
 export HF_HOME="${HF_HOME:-/data/lindseylm/.cache/huggingface}"
 unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE     # must be ONLINE to download
 
-echo "Prefetching '${BASE_MODEL}'"
+echo "Prefetching files for '${BASE_MODEL}' (revision='${HF_REVISION:-main}')"
 echo "  into HF_HOME=${HF_HOME}"
 echo "  conda env=${CONDA_DEFAULT_ENV}   python=$(command -v python)"
 
-python -c "import sys; from transformers import AutoConfig, AutoTokenizer, AutoModel; m=sys.argv[1]; AutoConfig.from_pretrained(m, trust_remote_code=True); AutoTokenizer.from_pretrained(m, trust_remote_code=True); AutoModel.from_pretrained(m, trust_remote_code=True); print('PREFETCH OK:', m)" "${BASE_MODEL}"
-
-echo "Verifying offline load (simulates the compute node)..."
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -c "import sys; from transformers import AutoTokenizer, AutoModel; m=sys.argv[1]; AutoTokenizer.from_pretrained(m, trust_remote_code=True); AutoModel.from_pretrained(m, trust_remote_code=True); print('OFFLINE LOAD OK:', m)" "${BASE_MODEL}"
+BASE_MODEL="${BASE_MODEL}" HF_REVISION="${HF_REVISION:-}" python -c "
+import os
+from huggingface_hub import snapshot_download
+m = os.environ['BASE_MODEL']
+rev = os.environ.get('HF_REVISION') or None
+path = snapshot_download(repo_id=m, revision=rev)
+print('PREFETCH OK:', m, '(rev=%s)' % (rev or 'main'), '->', path)
+"
