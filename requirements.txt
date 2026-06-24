@@ -1,9 +1,17 @@
 # Nucleotide Transformer v2 Fine-tuning Requirements
 # Install with: pip install -r requirements.txt
+#
+# IMPORTANT — torch is intentionally NOT listed here. On linux-aarch64 (Delta-AI
+# GH200) a plain `pip install torch` resolves to a CPU-ONLY wheel (cuda False).
+# Install torch FIRST from the CUDA index, then run this file:
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+# (torch 2.5.1 + CUDA 12.4 is the version proven working on Delta GH200 — matches
+# the generanno/dnabert2 envs. setup_deltaai.sh does this two-step for you.)
 
 # Core dependencies
-torch>=2.0.0
-transformers>=4.35.0
+# transformers PINNED: 5.x requires torch>=2.4 AND has breaking API changes; the
+# NT-v2 scripts target the 4.x line. 4.49.0 matches the generanno Delta env.
+transformers==4.49.0
 datasets>=2.14.0
 accelerate>=0.24.0
 

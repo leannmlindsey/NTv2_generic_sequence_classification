@@ -20,13 +20,16 @@
 echo "=== inference ${VARIANT}  input=${INPUT_CSV}  output=${OUTPUT_FILENAME} ==="
 echo "Started at: $(date)  Node: $(hostname)  Job: ${SLURM_JOB_ID:-N/A}"
 
-module load CUDA/12.8
-source /data/lindseylm/conda/etc/profile.d/conda.sh
-conda activate "${CONDA_ENV:-nt}"
-if [ "${CONDA_DEFAULT_ENV}" != "${CONDA_ENV:-nt}" ]; then
-    echo "ERROR: could not activate conda env '${CONDA_ENV:-nt}' (active: '${CONDA_DEFAULT_ENV:-none}'). Aborting." >&2
-    exit 1
-fi
+# --- conda env setup: BIOWULF ONLY, disabled for Delta ---------------------
+# Delta-AI inherits the submitting shell's environment (sbatch --export=ALL), so
+# `conda activate nt` happens on the LOGIN node BEFORE the driver runs.
+# module load CUDA/12.8
+# source /data/lindseylm/conda/etc/profile.d/conda.sh
+# conda activate "${CONDA_ENV:-nt}"
+# if [ "${CONDA_DEFAULT_ENV}" != "${CONDA_ENV:-nt}" ]; then
+#     echo "ERROR: could not activate conda env '${CONDA_ENV:-nt}' (active: '${CONDA_DEFAULT_ENV:-none}'). Aborting." >&2
+#     exit 1
+# fi
 echo "  conda env: ${CONDA_DEFAULT_ENV}   python: $(command -v python)"
 export PYTHONNOUSERSITE=1
 export CUDA_VISIBLE_DEVICES=0
@@ -34,7 +37,7 @@ export TOKENIZERS_PARALLELISM=false
 
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-export HF_HOME=${HF_HOME:-/data/lindseylm/.cache/huggingface}
+export HF_HOME=${HF_HOME:-/work/hdd/bfzj/llindsey1/hf_cache}
 
 if [ -z "${REPO_ROOT:-}" ]; then
     echo "ERROR: REPO_ROOT is not set; the launcher must pass it via --export"; exit 1

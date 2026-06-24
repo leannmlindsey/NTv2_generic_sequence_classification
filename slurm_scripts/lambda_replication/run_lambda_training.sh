@@ -17,9 +17,9 @@
 #   4. bash slurm_scripts/lambda_replication/run_lambda_inference.sh
 
 
-# Absolute path to this lambda_replication dir on Biowulf (hardcoded so it is
-# correct no matter what directory the script is launched/submitted from).
-SCRIPT_DIR="/vf/users/lindseylm/GLM_EVALUATIONS/NAR_GENOMICS_LAMBDA_REPO/NTv2_generic_sequence_classification/slurm_scripts/lambda_replication"
+# This lambda_replication dir, resolved from the script's own location (works no
+# matter where the driver is launched from — Delta clone path differs from Biowulf).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # REPO_ROOT is the repo root (holds finetune_nt_phage.py, inference_nt.py,
 # embedding_analysis_nt.py). slurm_scripts/lambda_replication -> ../.. == root.
 REPO_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
@@ -84,7 +84,7 @@ echo "============================================================"
 
 # --- common sbatch flags ------------------------------------------------------
 
-FT_FLAGS=(--partition=gpu --gres=gpu:a100:1 --mem="${FT_MEM}" --time="${FT_TIME}" --cpus-per-task=8)
+FT_FLAGS=(--account=bfzj-dtai-gh --partition=ghx4 --gpus-per-node=1 --mem="${FT_MEM}" --time="${FT_TIME}" --cpus-per-task=8)
 
 # REPO_ROOT is propagated to every job so they can cd to the real repo — SLURM
 # stages each job script to /var/spool/slurm/... where BASH_SOURCE[0] can't

@@ -25,14 +25,19 @@
 echo "=== finetune ${VARIANT} seed=${SEED} len=${LEN:-?} ==="
 echo "Started at: $(date)  Node: $(hostname)  Job: ${SLURM_JOB_ID:-N/A}"
 
-# Activate conda (bare style — no set -e; see PORTING_GUIDE gotcha #5).
-module load CUDA/12.8
-source /data/lindseylm/conda/etc/profile.d/conda.sh
-conda activate "${CONDA_ENV:-nt}"
-if [ "${CONDA_DEFAULT_ENV}" != "${CONDA_ENV:-nt}" ]; then
-    echo "ERROR: could not activate conda env '${CONDA_ENV:-nt}' (active: '${CONDA_DEFAULT_ENV:-none}'). Aborting." >&2
-    exit 1
-fi
+# --- conda env setup: BIOWULF ONLY, disabled for Delta ---------------------
+# Delta-AI inherits the submitting shell's environment (sbatch --export=ALL), so
+# `conda activate nt` (and any module load) happens on the LOGIN node BEFORE the
+# driver runs. The block below was required on Biowulf, where jobs did NOT
+# inherit the submitting shell's environment. (bare style — no set -e; under
+# set -e a failed `source activate` silently kills SLURM jobs.)
+# module load CUDA/12.8
+# source /data/lindseylm/conda/etc/profile.d/conda.sh
+# conda activate "${CONDA_ENV:-nt}"
+# if [ "${CONDA_DEFAULT_ENV}" != "${CONDA_ENV:-nt}" ]; then
+#     echo "ERROR: could not activate conda env '${CONDA_ENV:-nt}' (active: '${CONDA_DEFAULT_ENV:-none}'). Aborting." >&2
+#     exit 1
+# fi
 echo "  conda env: ${CONDA_DEFAULT_ENV}   python: $(command -v python)"
 export PYTHONNOUSERSITE=1
 export CUDA_VISIBLE_DEVICES=0
@@ -42,7 +47,7 @@ export TOKENIZERS_PARALLELISM=false
 # pre-warmed from a login node (see lambda_replication/README.md).
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-export HF_HOME=${HF_HOME:-/data/lindseylm/.cache/huggingface}
+export HF_HOME=${HF_HOME:-/work/hdd/bfzj/llindsey1/hf_cache}
 
 # REPO_ROOT is supplied by the launcher via --export (the batch script is staged
 # to the SLURM spool dir, so its own path can't be used to find the repo).

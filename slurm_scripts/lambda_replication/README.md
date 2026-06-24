@@ -6,22 +6,53 @@ the LAMBDA_v1 windows and seeds, then picks the best seed per window by test-set
 MCC and runs all diagnostic + genome-wide inference. The model/experiment code
 is unchanged — these scripts only submit it with the right env.
 
-## Two-step workflow
+## Environment (Delta-AI / GH200, aarch64)
+
+Conda base is `/u/llindsey1/miniconda3`. The env is named `nt` and lives in the
+home miniconda3. Build it once (also scripted in the repo's `setup_deltaai.sh`):
 
 ```bash
-# 0. (one time) pre-warm the HF cache from a LOGIN node so jobs can run offline:
-#    module load conda && source activate nt
-#    python -c "from transformers import AutoModel, AutoTokenizer; \
-#      m='InstaDeepAI/nucleotide-transformer-v2-500m-multi-species'; \
-#      AutoTokenizer.from_pretrained(m, trust_remote_code=True); \
-#      AutoModel.from_pretrained(m, trust_remote_code=True)"
-#    (set HF_HOME=/data/lindseylm/.cache/huggingface first)
+source /u/llindsey1/miniconda3/etc/profile.d/conda.sh
+conda create -y -n nt python=3.11
+conda activate nt
+# 1) torch FIRST from the CUDA index — a plain pip install gives a CPU-only
+#    aarch64 wheel. 2.5.1 + cu124 is the version proven working on Delta GH200
+#    (matches the generanno/dnabert2 envs).
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+# 2) everything else (transformers PINNED 4.49.0; torch is NOT in this file):
+pip install -r requirements.txt
+# verify on a GPU node (srun ... --partition=ghx4 --gpus-per-node=1):
+python -c "import torch, transformers; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda, transformers.__version__)"
+```
 
-# 1. Edit lambda_replication.conf — confirm LAMBDA_BASE + OUTPUT_DIR.
+`torch.cuda.is_available()` must be `True` before running the pipeline. Pitfalls
+that bite on aarch64: a plain `pip install torch` → **CPU-only** wheel
+(`cuda False`), and an unpinned `transformers` → **5.x**, which requires
+torch ≥ 2.4 and breaks the 4.x-era NT-v2 scripts. Both are pinned now. No
+flash-attn / Transformer-Engine compile is needed on GH200.
+
+## Two-step workflow (Delta-AI / GH200)
+
+On Delta the job bodies do **not** self-activate conda — they inherit the login
+shell via `sbatch --export=ALL`. So **activate `nt` on the login node first**,
+then run the drivers from there (the drivers only `sbatch`; they don't need a
+GPU themselves).
+
+```bash
+# 0a. (every session) activate the env on the LOGIN node so jobs inherit it:
+source /u/llindsey1/miniconda3/etc/profile.d/conda.sh
+conda activate nt
+
+# 0b. (one time) pre-warm the HF cache so the (possibly offline) compute nodes
+#     can find the model. HF_HOME is read from lambda_replication.conf
+#     (=/work/hdd/bfzj/llindsey1/hf_cache):
+bash slurm_scripts/lambda_replication/prefetch_hf_cache.sh
+
+# 1. Edit lambda_replication.conf — confirm LAMBDA_BASE + OUTPUT_DIR (Delta /work paths).
 bash slurm_scripts/lambda_replication/run_lambda_training.sh   # finetune × seeds × windows
 # 2. wait — squeue -u $USER
 bash slurm_scripts/lambda_replication/check_training.sh        # confirm all seeds healthy
-bash slurm_scripts/lambda_replication/run_lambda_inference.sh  # pick winner + all inference
+bash slurm_scripts/lambda_replication/run_lambda_inference.sh  # pick winner + all inference (+ PHROG)
 # 3. wait — squeue -u $USER
 bash slurm_scripts/lambda_replication/check_inference.sh       # confirm all outputs landed
 ```
@@ -76,4 +107,16 @@ bash slurm_scripts/lambda_replication/check_inference.sh       # confirm all out
   chained (unlike the DNABERT-2 reference).
 - **Bare job scripts.** No `set -e` and no `2>/dev/null` masking in the job
   bodies — `source activate` under `set -e` silently kills SLURM jobs.
-- Outputs go under `/data/lindseylm/...`, never `/gpfs/gsfs12/...`.
+- **PHROG annotated set.** `run_lambda_inference.sh` also runs the 2k winner on
+  `PHROG_2k` (`fnr_test/2k/phage_annotated_segments_2k.csv`) and writes
+  `NTv2_phage_annotated_segments_2k_predictions.csv` (canonical, model-prefixed)
+  under `inference/<variant>/`. `inference_nt.py` does `output_df = df.copy()`,
+  so the input's `phrog_category` / `phrog_db_category` columns pass through.
+  This is distinct from the FNR sliding-window file.
+- **Delta-AI paths.** Everything lives on `/work/hdd/bfzj/llindsey1/...`
+  (LAMBDA_BASE, OUTPUT_DIR, HF_HOME). Home `/u` is tiny/inode-limited — nothing
+  big goes there. The old Biowulf `/data/lindseylm`, `/vf/users`, `/gpfs` paths
+  no longer exist for this account.
+- **SLURM.** Drivers submit with `--account=bfzj-dtai-gh --partition=ghx4
+  --gpus-per-node=1` (GH200). `SCRIPT_DIR` is resolved from each script's own
+  location, so the repo can be cloned to any path on Delta.

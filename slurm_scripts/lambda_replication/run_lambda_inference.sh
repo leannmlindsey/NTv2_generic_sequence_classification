@@ -24,9 +24,9 @@
 #   bash slurm_scripts/lambda_replication/run_lambda_inference.sh
 
 
-# Absolute path to this lambda_replication dir on Biowulf (hardcoded so it is
-# correct no matter what directory the script is launched/submitted from).
-SCRIPT_DIR="/vf/users/lindseylm/GLM_EVALUATIONS/NAR_GENOMICS_LAMBDA_REPO/NTv2_generic_sequence_classification/slurm_scripts/lambda_replication"
+# This lambda_replication dir, resolved from the script's own location (works no
+# matter where the driver is launched from — Delta clone path differs from Biowulf).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
 CONFIG="${SCRIPT_DIR}/lambda_replication.conf"
 
@@ -64,8 +64,8 @@ LOGDIR="${OUTPUT_DIR}/logs"
 
 # --- common sbatch flags ------------------------------------------------------
 
-INF_FLAGS=(--partition=gpu --gres=gpu:a100:1 --mem="${INF_MEM}" --time="${INF_TIME}" --cpus-per-task=8)
-EMB_FLAGS=(--partition=gpu --gres=gpu:a100:1 --mem="${EMB_MEM}" --time="${EMB_TIME}" --cpus-per-task=8)
+INF_FLAGS=(--account=bfzj-dtai-gh --partition=ghx4 --gpus-per-node=1 --mem="${INF_MEM}" --time="${INF_TIME}" --cpus-per-task=8)
+EMB_FLAGS=(--account=bfzj-dtai-gh --partition=ghx4 --gpus-per-node=1 --mem="${EMB_MEM}" --time="${EMB_TIME}" --cpus-per-task=8)
 
 EMB_ENV_BASE="REPO_ROOT=${REPO_ROOT},CONDA_ENV=${CONDA_ENV},HF_HOME=${HF_HOME},BASE_MODEL=${BASE_MODEL},POOLING=${POOLING},EMB_SEED=${EMB_SEED},NN_EPOCHS=${NN_EPOCHS},NN_HIDDEN_DIM=${NN_HIDDEN_DIM},NN_LR=${NN_LR},BATCH_SIZE=${INF_BATCH_SIZE},INCLUDE_RANDOM_BASELINE=${INCLUDE_RANDOM_BASELINE:-false}"
 
@@ -213,6 +213,32 @@ for LEN in ${RUN_LENGTHS}; do
                     "${SCRIPT_DIR}/lambda_inference_job.sh"
                 NUM_JOBS=$((NUM_JOBS + 1))
             done
+        fi
+
+        # PHROG annotated set — feeds the central PHROG category table. Distinct
+        # from the FNR sliding-window file. Only lengths with PHROG_<LEN> set
+        # (currently 2k). Output uses the CANONICAL model-prefixed name the
+        # central PHROG table script reads; inference_nt.py carries the input's
+        # phrog_category / phrog_db_category columns through (output_df=df.copy()).
+        phrog_var="PHROG_${LEN}"
+        PHROG_PATH="${!phrog_var:-}"
+        if [ -n "${PHROG_PATH}" ]; then
+            if [ -f "${PHROG_PATH}" ]; then
+                stem=$(basename "${PHROG_PATH}" .csv)
+                OUT_NAME="${MODEL_PREFIX:-NTv2}_${stem}_predictions.csv"
+                JOB="phrog_${LEN}_${VARIANT}"
+                echo "    submitting ${JOB} -> ${OUT_NAME}..."
+                sbatch \
+                    --job-name="${JOB}" \
+                    --output="${LOGDIR}/${JOB}_%j.out" \
+                    --error="${LOGDIR}/${JOB}_%j.err" \
+                    "${INF_FLAGS[@]}" \
+                    --export="ALL,${INF_ENV},INPUT_CSV=${PHROG_PATH},OUTPUT_FILENAME=${OUT_NAME}" \
+                    "${SCRIPT_DIR}/lambda_inference_job.sh"
+                NUM_JOBS=$((NUM_JOBS + 1))
+            else
+                echo "    WARNING: PHROG_${LEN}=${PHROG_PATH} not found — skipping PHROG for ${LEN}"
+            fi
         fi
     done
 

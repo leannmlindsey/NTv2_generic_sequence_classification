@@ -14,15 +14,16 @@
 # Usage:
 #   bash slurm_scripts/lambda_replication/prefetch_hf_cache.sh
 
-# Absolute path to this lambda_replication dir on Biowulf (hardcoded so it is
-# correct no matter what directory the script is launched/submitted from).
-SCRIPT_DIR="/vf/users/lindseylm/GLM_EVALUATIONS/NAR_GENOMICS_LAMBDA_REPO/NTv2_generic_sequence_classification/slurm_scripts/lambda_replication"
+# This lambda_replication dir, resolved from the script's own location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lambda_replication.conf"
 
-source /data/lindseylm/conda/etc/profile.d/conda.sh
-conda activate "${CONDA_ENV}"
+# BIOWULF ONLY (disabled for Delta): activate the conda env on the LOGIN node
+# BEFORE running this prefetch (the env you built as `nt`), then run this script.
+# source /u/llindsey1/miniconda3/etc/profile.d/conda.sh
+# conda activate "${CONDA_ENV}"
 
-export HF_HOME="${HF_HOME:-/data/lindseylm/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-/work/hdd/bfzj/llindsey1/hf_cache}"
 unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE     # must be ONLINE to download
 
 echo "Prefetching files for '${BASE_MODEL}' (revision='${HF_REVISION:-main}')"
