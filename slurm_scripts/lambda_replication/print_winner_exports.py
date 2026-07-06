@@ -22,9 +22,14 @@ def main():
     if variant not in winners:
         sys.exit(f"ERROR: {variant} not in {winners_path}")
     w = winners[variant]
+    # Finetune winners carry 'path' (the seed checkpoint dir); probe winners carry
+    # 'head_path' (+ 'scaler_path' for the NN). Emit all; the job body branches on
+    # WINNER_TYPE.
     print(f"WINNER_TYPE={shlex.quote(w.get('type', 'finetune'))}")
-    print(f"WINNER_PATH={shlex.quote(w['path'])}")
+    print(f"WINNER_PATH={shlex.quote(w.get('path', ''))}")
     print(f"WINNER_SEED={shlex.quote(str(w.get('seed', '')))}")
+    print(f"WINNER_HEAD_PATH={shlex.quote(w.get('head_path', ''))}")
+    print(f"WINNER_SCALER_PATH={shlex.quote(w.get('scaler_path', ''))}")
     print(f"BASE_MODEL={shlex.quote(w.get('base_model', DEFAULT_BASE_MODEL))}")
 
 

@@ -162,6 +162,8 @@ for LEN in ${RUN_LENGTHS}; do
 
     for VARIANT in ${VARIANTS}; do
         # --- embedding analysis (Surface D) — independent of winners ---
+        # SKIP_EMBEDDING=true skips this (2nd pass: embedding already done).
+        if [ "${SKIP_EMBEDDING:-false}" != "true" ]; then
         EMB_JOB="emb_${LEN}_${VARIANT}"
         echo "    submitting ${EMB_JOB}..."
         sbatch \
@@ -172,6 +174,15 @@ for LEN in ${RUN_LENGTHS}; do
             --export="ALL,REPL_OUTPUT_DIR=${REPL_LEN_DIR},LAMBDA_DIR=${LAMBDA_DIR},${EMB_ENV_BASE},VARIANT=${VARIANT},LEN=${LEN},MAX_LENGTH=${MAX_LENGTH}" \
             "${SCRIPT_DIR}/lambda_embedding_job.sh"
         NUM_JOBS=$((NUM_JOBS + 1))
+        fi
+
+        # Embedding-only mode: submit embedding above, skip all inference. Use this
+        # first (SKIP_INFERENCE=true) to (re)generate the saved probe artifacts, wait
+        # for the jobs, THEN run the plain pass (SKIP_EMBEDDING=true) so a probe
+        # winner's artifacts exist before inference reads them.
+        if [ "${SKIP_INFERENCE:-false}" = "true" ]; then
+            continue
+        fi
 
         # Skip prediction surfaces if no winning seed for this variant.
         if [[ " ${HAVE_VARIANTS} " != *" ${VARIANT} "* ]]; then

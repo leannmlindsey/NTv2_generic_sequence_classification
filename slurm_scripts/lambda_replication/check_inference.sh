@@ -10,7 +10,9 @@
 #              for test / fpr / gc_control / fnr (fnr only if FNR_<LEN> set+exists),
 #              with accuracy & mcc straight from the metrics JSON
 #   GENOME     genome_wide_*_predictions.csv count vs CSVs in GENOME_WIDE_<LEN>
-# then lists any non-empty .err files from inference/embedding jobs.
+#   PHROG      <MODEL_PREFIX>_<stem>_predictions.csv for PHROG_<LEN> (incl. a
+#              phrog_db_category column check) — only lengths with PHROG_<LEN> set
+# then lists any non-empty .err files from inference/embedding/phrog jobs.
 #
 # Usage:
 #   bash slurm_scripts/lambda_replication/check_inference.sh
@@ -144,12 +146,31 @@ for LEN in ${RUN_LENGTHS}; do
             printf "    %-10s %s  predictions=%s/%s\n" \
                 "genome" "${GWS}" "${GW_GOT}" "${GW_EXPECTED}"
         fi
+
+        # PHROG (annotated set) — only lengths with PHROG_<LEN> set. Verifies the
+        # canonical model-prefixed file exists AND carries the phrog_db_category
+        # column the central PHROG table groups by.
+        phrog_var="PHROG_${LEN}"
+        PHROG_PATH="${!phrog_var:-}"
+        if [ -n "${PHROG_PATH}" ]; then
+            stem=$(basename "${PHROG_PATH}" .csv)
+            PCSV="${INF_DIR}/${MODEL_PREFIX:-NTv2}_${stem}_predictions.csv"
+            if [ -f "${PCSV}" ]; then
+                if head -1 "${PCSV}" | tr ',' '\n' | grep -qx "phrog_db_category"; then
+                    printf "    %-10s ok   (has phrog_db_category)\n" "phrog"
+                else
+                    printf "    %-10s ok   WARNING: phrog_db_category column MISSING\n" "phrog"
+                fi
+            else
+                printf "    %-10s MISSING (%s)\n" "phrog" "$(basename "${PCSV}")"
+            fi
+        fi
     done
 done
 
 echo ""
 echo "=== non-empty .err files (potential failures) ==="
-ERRS=$(find "${LOGDIR}" \( -name "inf_*.err" -o -name "gwinf_*.err" -o -name "emb_*.err" \) -size +0c -printf "%s  %p\n" 2>/dev/null | sort -rn)
+ERRS=$(find "${LOGDIR}" \( -name "inf_*.err" -o -name "gwinf_*.err" -o -name "emb_*.err" -o -name "phrog_*.err" \) -size +0c -printf "%s  %p\n" 2>/dev/null | sort -rn)
 if [ -n "${ERRS}" ]; then
     echo "${ERRS}"
 else

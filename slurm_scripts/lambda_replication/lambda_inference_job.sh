@@ -60,22 +60,41 @@ fi
 # BASE_MODEL, WINNER_TYPE) read from winners.json[VARIANT].
 eval "$(python "${SCRIPT_DIR}/print_winner_exports.py" "${WINNERS_JSON}" "${VARIANT}")"
 
-echo "  winner seed:   ${WINNER_SEED}"
-echo "  winner path:   ${WINNER_PATH}"
+echo "  winner type:   ${WINNER_TYPE:-finetune}"
+echo "  winner path:   ${WINNER_PATH}${WINNER_HEAD_PATH}"
 echo "  base model:    ${BASE_MODEL}"
 
 OUTPUT_DIR="${REPL_OUTPUT_DIR}/inference/${VARIANT}"
 mkdir -p "${OUTPUT_DIR}"
+OUTPUT_CSV="${OUTPUT_DIR}/${OUTPUT_FILENAME}"
 
-# inference_nt.py writes <output_csv stem>_metrics.json next to the predictions
-# CSV when --save_metrics and labels are present.
-python inference_nt.py \
-    --input_csv "${INPUT_CSV}" \
-    --model_path "${WINNER_PATH}" \
-    --output_csv "${OUTPUT_DIR}/${OUTPUT_FILENAME}" \
-    --max_length ${MAX_LENGTH} \
-    --batch_size ${BATCH_SIZE} \
-    --threshold ${THRESHOLD} \
-    --save_metrics
+if [ "${WINNER_TYPE:-finetune}" = "finetune" ]; then
+    # inference_nt.py writes <output_csv stem>_metrics.json next to the predictions
+    # CSV when --save_metrics and labels are present.
+    python inference_nt.py \
+        --input_csv "${INPUT_CSV}" \
+        --model_path "${WINNER_PATH}" \
+        --output_csv "${OUTPUT_CSV}" \
+        --max_length ${MAX_LENGTH} \
+        --batch_size ${BATCH_SIZE} \
+        --threshold ${THRESHOLD} \
+        --save_metrics
+else
+    # Probe winner (linear_probe | three_layer_nn): deploy the saved probe on the
+    # base model. max_length MUST match what embedding_analysis_nt.py used.
+    SCALER_ARG=()
+    [ -n "${WINNER_SCALER_PATH:-}" ] && SCALER_ARG=(--scaler_path "${WINNER_SCALER_PATH}")
+    python inference_embedding_head_nt.py \
+        --model_path "${BASE_MODEL}" \
+        --head_type "${WINNER_TYPE}" \
+        --head_path "${WINNER_HEAD_PATH}" \
+        "${SCALER_ARG[@]}" \
+        --input_csv "${INPUT_CSV}" \
+        --output_csv "${OUTPUT_CSV}" \
+        --max_length ${MAX_LENGTH} \
+        --batch_size ${BATCH_SIZE} \
+        --threshold ${THRESHOLD} \
+        --save_metrics
+fi
 
 echo "Done: $(date)"
